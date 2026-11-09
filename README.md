@@ -19,14 +19,24 @@ draw phases and api crates.
 
 | Crate | Path | What |
 |---|---|---|
-| `portals_component` | `component/` | Portals (pulsar.portals): the portal component, pairing and projection, and the registrations of the plugin's Helio features |
-| `portals_plugin` | `editor/` | Portals (pulsar.portals): the editor plugin -- its metadata, over the plugin's component crate |
+| `portals_component` | `component/` | Portals (pulsar.portals): the portal component, pairing and projection, and the plugin's Helio feature set and its settings |
+| `portals_plugin` | `.` | Portals (`pulsar.portals`): the plugin's root crate, the one place it registers everything it contributes (runtime registrations always, the editor's with `editor`) |
+| `portals_editor` | `editor/` | Portals (pulsar.portals): the editor crate -- the viewport's portal diagnostics overlay, over the plugin's component crate |
 | `portals-examples` | `examples/` | The portals plugin's standalone hosts on Helio: portal demos |
 | `helio-pass-portal-cull` | `feature/cull/` | Per-portal GPU frustum culling: selects which instances get a duplicate draw through each active portal |
 | `helio-pass-portal-instances` | `feature/instances/` | Draws portal-duplicated instances (from helio-pass-portal-cull) into the G-buffer, clipped to each portal's opening |
 
-- **Runtime module** (what a game built for a project links): `portals_component`.
-- **Editor module** (what the editor links in addition): `portals_plugin`.
+The root crate (`portals_plugin`, this directory's package) is the one place
+the plugin registers what it contributes: its component classes, every
+registration that names an origin (`pulsar_plugins::origin!()`) and the
+descriptor. The other crates hold the code and register nothing but their
+types' own attachments, so `src/runtime.rs` (and `src/editor.rs`, with
+the `editor` feature) lists everything the plugin brings. The plugin's
+integration tests (`tests/`) link the root, as a game does.
+
+- **Runtime module** (what a game built for a project links): `portals_plugin`.
+- **Editor module** (what the editor links in addition): `portals_plugin` with its
+  `editor` feature (`portals_editor`).
 - **Requires**: nothing. A project enables or disables the plugin in its
   `Pulsar.toml` (`[plugins]`); disabled, the kind is absent and the frame
   draws without it.
@@ -44,8 +54,8 @@ only inside a Pulsar-Native checkout:
 ```bash
 git clone --recursive https://github.com/Far-Beyond-Pulsar/Pulsar-Native
 cd Pulsar-Native
-cargo check -p portals_component -p portals_plugin -p portals-examples -p helio-pass-portal-cull -p helio-pass-portal-instances --tests
-cargo test -p portals_component -p helio-pass-portal-cull -p helio-pass-portal-instances
+cargo check -p portals_plugin -p portals_component -p portals_editor --features portals_plugin/editor -p portals-examples -p helio-pass-portal-cull -p helio-pass-portal-instances --tests
+cargo test -p portals_plugin -p portals_component -p helio-pass-portal-cull -p helio-pass-portal-instances
 ```
 
 Suites that render real frames need a GPU; CI leaves them out by name
