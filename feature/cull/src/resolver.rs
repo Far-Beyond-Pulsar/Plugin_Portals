@@ -1,7 +1,7 @@
 //! CPU-side resolution of indexed sublevels and peer-linked portals.
 //!
 //! This module is the authored-data boundary for the sublevel/portal system.
-//! It consumes `SubLevelActorRow` and the authored peer-based
+//! It consumes `SubLevelActorRow` (the scene model's placements) and the authored peer-based
 //! `PortalRow`, then produces resolved contexts and portal mappings for
 //! the existing coordinate-space, portal-view, and portal-chain projection
 //! code. It intentionally does not write SceneDB rows or GPU buffers.
@@ -12,7 +12,7 @@ use std::fmt;
 use glam::{Mat4, Vec2, Vec4};
 use pulsar_scenedb::Entity;
 
-use helio_mesh_api::{SubLevelActorRow, SubLevelIndex, DEFAULT_SUBLEVEL_INDEX};
+use pulsar_scene_model::{SubLevelActorRow, SubLevelIndex, DEFAULT_SUBLEVEL_INDEX};
 
 use crate::components::{PortalRow, PortalViewRow, NO_PORTAL_PEER};
 use crate::portal_math::portal_view_map;

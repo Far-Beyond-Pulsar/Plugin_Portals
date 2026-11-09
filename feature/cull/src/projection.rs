@@ -19,7 +19,7 @@ use crate::resolver::{
     PortalOccurrence, PortalProjection, ResolutionError, ResolvedPortalChain, SubLevelResolver,
 };
 use helio_core::CoordinateSpaceAllocator;
-use helio_mesh_api::SubLevelIndex;
+use pulsar_scene_model::SubLevelIndex;
 
 /// The coordinate-space slot reserved for root/world coordinates.
 pub const IDENTITY_COORDINATE_SPACE_SLOT: u32 = 0;
@@ -546,7 +546,7 @@ mod tests {
     use super::*;
     use crate::components::PortalRow;
     use crate::resolver::SubLevelContents;
-    use helio_mesh_api::SubLevelActorRow;
+    use pulsar_scene_model::SubLevelActorRow;
 
     #[test]
     fn dense_indexing_and_identity_slot_are_deterministic() {
