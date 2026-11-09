@@ -2,6 +2,9 @@
 //! (rigid frames, sublevel placements) and a portal projection take their slots
 //! from the same allocator, so none overwrites another.
 
+// The plugin as a game links it: its root, with every registration.
+use portals_plugin as _;
+
 use engine_backend::scene::frames::{SpaceSlot, frame_table, make_frame};
 use engine_backend::scene::{SceneWorldExt, SpaceTable, SpawnObject, Transform};
 use glam::{Mat4, Vec3};

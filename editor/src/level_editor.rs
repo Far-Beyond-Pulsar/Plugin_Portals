@@ -1,35 +1,38 @@
 //! The portals' debug overlay in the level editor's viewport: the link
 //! list (paired portals, problems), badges over each portal and the ghost
-//! geometry of a selected direction, registered through the level editor's
-//! extension points (`ui_level_editor::extend::viewport`). Shown from the
-//! viewport's Overlays menu or by choosing the portal debug view
+//! geometry of a selected direction, which the plugin's root crate
+//! registers through the level editor's extension points
+//! (`ui_level_editor::extend::viewport::DebugOverlay`: [`overlay_panel`],
+//! [`overlay_perspective`], [`overlay_hidden`]). Shown from the viewport's
+//! Overlays menu or by choosing the portal debug view
 //! ([`portals_component::PORTAL_DEBUG_VIEW_MODE`]).
 
 use std::sync::{Arc, Mutex};
 
+use engine_backend::subsystems::render::helio_renderer::HelioEditorMailbox;
 use gpui::prelude::*;
 use gpui::*;
 use ui::ActiveTheme as _;
 use ui::StyledExt as _;
 use ui_level_editor::extend::SharedState;
-use ui_level_editor::extend::viewport::{DebugOverlay, OverlayContext};
+use ui_level_editor::extend::viewport::OverlayContext;
 
-inventory::submit! {
-    DebugOverlay {
-        origin: pulsar_plugins::origin!(),
-        id: "portal_links",
-        menu_label: "Portal links",
-        debug_mode: Some(portals_component::PORTAL_DEBUG_VIEW_MODE),
-        panel: |context, cx| {
-            render_portal_debug_overlay(context.state.clone(), context.gpu_engine, cx)
-                .into_any_element()
-        },
-        perspective: |context| render_portal_badges(context.state.clone(), context.gpu_engine),
-        hidden: |mailbox| {
-            mailbox.set_view_payload(portals_component::PORTAL_DEBUG_TEXTS.key(), None);
-            mailbox.set_view_payload(portals_component::PORTAL_DEBUG_GEOMETRY.key(), None);
-        },
-    }
+/// The overlay's panel: the link list (paired portals, problems).
+pub fn overlay_panel(context: &OverlayContext, cx: &mut App) -> AnyElement {
+    render_portal_debug_overlay(context.state.clone(), context.gpu_engine, cx).into_any_element()
+}
+
+/// The overlay's per-frame work in a perspective view: a badge over each
+/// portal.
+pub fn overlay_perspective(context: &OverlayContext) {
+    render_portal_badges(context.state.clone(), context.gpu_engine);
+}
+
+/// Clears what the overlay gave the renderer (its labels and ghost
+/// geometry).
+pub fn overlay_hidden(mailbox: &HelioEditorMailbox) {
+    mailbox.set_view_payload(portals_component::PORTAL_DEBUG_TEXTS.key(), None);
+    mailbox.set_view_payload(portals_component::PORTAL_DEBUG_GEOMETRY.key(), None);
 }
 
 fn render_portal_debug_overlay(

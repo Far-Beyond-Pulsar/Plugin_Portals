@@ -13,7 +13,7 @@
 //! (a `SubLevelDisplayComponent`'s contents) pair with portals outside it the
 //! same way, which is how a doorway into another level instance is made.
 
-use engine_class_derive::{engine_class, register_world_component};
+use engine_class_derive::{engine_class, world_component};
 
 pub const PORTAL_CLASS_NAME: &str = "PortalComponent";
 
@@ -48,5 +48,5 @@ impl Default for PortalComponent {
     }
 }
 
-#[register_world_component]
+#[world_component]
 impl PortalComponent {}
