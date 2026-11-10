@@ -21,6 +21,8 @@ wgpu = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }
 log = { workspace = true }
 pulsar_scenedb = { workspace = true }
+# Sublevel placements (`SubLevelActorRow`): the engine's scene structure.
+pulsar_scene_model = { workspace = true }
 
 [dev-dependencies]
 naga = { version = "30", features = ["wgsl-in"] }

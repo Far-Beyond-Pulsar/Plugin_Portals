@@ -1,0 +1,53 @@
+# The portals plugin's rows of the SceneDB closure ledger (Pulsar-Native#1035):
+# its classes, GPU schemas, buffers, pass crates and call sites. A plugin owns
+# the rows of what it ships (Pulsar-Native#1606); `cargo test -p scene_inventory`
+# in a Pulsar-Native checkout recomputes every fact column, checks the human
+# columns, and fails on a missing, stale or misplaced row. The columns are
+# described in Pulsar-Native's crates/core/scene_inventory/ledger.toml.
+
+# ── Exposed component classes ───────────────────────────────────
+
+[[class]]
+name = "PortalComponent"
+category = "Rendering"
+world_registered = true
+own_gpu_columns = false
+owner = "portals_component::component"
+disposition = "keep: finished in Phase B (pulsar.portals): two portals with the same non-zero link_id are a pair, and the portals' join projects them; no longer declared unfinished"
+target_contract = "Phase B; plugin-migration.md"
+test = "plugins/installed/tests/render_acceptance.rs (linked_portals_show_the_far_side_in_the_frame)"
+status = "verified"
+
+# ── GPU buffer keys ─────────────────────────────────────────────
+
+[[buffer]]
+key = "portal_views"
+producers = []
+consumers = ["helio-pass-portal-cull", "helio-pass-portal-instances"]
+owner = "portal-cull pass type; written by Helio's PortalProjectionBridge at dense reserved entity slots (Helio examples); no engine writer"
+disposition = "unfinished (Phase 4; tracked in #1055): PortalComponent has no peer link and the editor world cannot provide dense projection slots"
+target_contract = "Phase 4; 03-gpu-reflection-and-rendering.md"
+test = "tracked in #1055"
+status = "unfinished"
+
+# ── Render pass crates ──────────────────────────────────────────
+
+[[pass]]
+crate = "helio-pass-portal-cull"
+in_default_graph = false
+reads = ["portal_views"]
+owner = "helio-presets (mapping); helio-pass-portal-cull (algorithm)"
+disposition = "runs in the editor graph, but nothing authored feeds it: portals (Phase 4)"
+target_contract = "Phase 6; 03-gpu-reflection-and-rendering.md"
+test = "tracked in #1055; plugins/installed/tests/render_acceptance.rs (every_pass_of_the_editor_graph_runs)"
+status = "unfinished"
+
+[[pass]]
+crate = "helio-pass-portal-instances"
+in_default_graph = false
+reads = ["portal_views"]
+owner = "helio-presets (mapping); helio-pass-portal-instances (algorithm)"
+disposition = "runs in the editor graph, but nothing authored feeds it: portals (Phase 4)"
+target_contract = "Phase 6; 03-gpu-reflection-and-rendering.md"
+test = "tracked in #1055; plugins/installed/tests/render_acceptance.rs (every_pass_of_the_editor_graph_runs)"
+status = "unfinished"
