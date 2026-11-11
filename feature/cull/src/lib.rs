@@ -86,8 +86,9 @@ pub use components::PORTALS;
 pub use components::PORTAL_PROJECTION_COUNTS;
 pub use components::PORTAL_VIEWS;
 pub use contract::{
-    portal_counts, GpuPortalView, PortalCounts, MAX_PORTAL_CHAINS, PORTAL_CHAIN_HANDLE_BUFFER,
-    PORTAL_CHAIN_PORTAL_POOL_BUFFER, PORTAL_COUNTS, PORTAL_VIEW_SNIPPET,
+    portal_counts, GpuPortalView, PortalCounts, MAX_PORTAL_CHAINS, PORTAL_CHAIN_HANDLES,
+    PORTAL_CHAIN_HANDLE_BUFFER, PORTAL_CHAIN_PORTALS, PORTAL_CHAIN_PORTAL_POOL_BUFFER,
+    PORTAL_COUNTS, PORTAL_VIEW_SNIPPET,
 };
 pub use helio_core::CoordinateSpacesFrameData;
 

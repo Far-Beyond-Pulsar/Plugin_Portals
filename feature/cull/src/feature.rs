@@ -35,6 +35,9 @@ impl Feature for PortalCullFeature {
     }
 
     fn register(&self, registrar: &mut FeatureRegistrar<'_>) {
+        registrar.consumes(crate::PORTAL_VIEWS);
+        registrar.consumes(crate::PORTAL_CHAIN_HANDLES);
+        registrar.consumes(crate::PORTAL_CHAIN_PORTALS);
         registrar.node(
             pass_node(
                 "portal_cull",

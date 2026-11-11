@@ -2,46 +2,45 @@
 //! runtime contribution, grouped by the engine seam it plugs into.
 
 use engine_backend::scene::SpaceProducerRegistration;
+use engine_backend::scene::{ClassSpec, ComponentsBuilder};
 use engine_backend::subsystems::render::RenderFeatureRegistration;
 use portals_component::{PortalComponent, PortalSync};
 use pulsar_settings::project::rendering::SettingsGroupRegistration;
 
-// ── Component classes ───────────────────────────────────────────────────────
+/// Everything the portals plugin registers for a game.
+pub(crate) fn build(p: &mut pulsar_plugins::PluginBuilder) {
+    // ── Component classes ───────────────────────────────────────────────────
 
-pulsar_world_registry::submit_world_component!(PortalComponent);
+    p.components()
+        .class::<PortalComponent>(ClassSpec::default());
 
-// ── Scene ───────────────────────────────────────────────────────────────────
+    // ── Scene ───────────────────────────────────────────────────────────────
 
-// Each frame, every renderer pairs the authored portals and expands them
-// into views and recursion chains with slots in the frame's space table.
-inventory::submit! {
-    SpaceProducerRegistration {
-        origin: pulsar_plugins::origin!(),
+    // Each frame, every renderer pairs the authored portals and expands them
+    // into views and recursion chains with slots in the frame's space table.
+    p.add(SpaceProducerRegistration {
+        origin: p.origin(),
         name: "portals",
         new: || Box::new(PortalSync::default()),
-    }
-}
+    });
 
-// ── Rendering ───────────────────────────────────────────────────────────────
+    // ── Rendering ───────────────────────────────────────────────────────────
 
-// Portal culling and the portal draws (a G-buffer drawer, the mask and the
-// editor overlay), configured from the project's portal settings.
-inventory::submit! {
-    RenderFeatureRegistration {
-        origin: pulsar_plugins::origin!(),
+    // Portal culling and the portal draws (a G-buffer drawer, the mask and
+    // the editor overlay), configured from the project's portal settings.
+    p.add(RenderFeatureRegistration {
+        origin: p.origin(),
         features: portals_component::render_features,
         configure: portals_component::configure_renderer,
-    }
-}
+    });
 
-// ── Settings ────────────────────────────────────────────────────────────────
+    // ── Settings ────────────────────────────────────────────────────────────
 
-// The `project.portals` settings group.
-inventory::submit! {
-    SettingsGroupRegistration {
-        origin: pulsar_plugins::origin!(),
+    // The `project.portals` settings group.
+    p.add(SettingsGroupRegistration {
+        origin: p.origin(),
         group: &helio_pass_portal_cull::settings::PORTALS,
-    }
+    });
 }
 
 #[cfg(test)]

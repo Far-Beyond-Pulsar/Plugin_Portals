@@ -6,7 +6,16 @@ id = "pulsar.portals"
 name = "Portals"
 description = "Openings that show another place: their component, pairing and projection, settings and the renderer features that cull and draw through them"
 enabled_by_default = true
-requires = []
+provides = [
+  { id = "pulsar.portals.rows", kind = "buffer", members = ["portals", "portal_views", "portal_projection_counts", "PortalChainComponent::portals", "PortalChainComponent::portals::handles"] },
+]
+# Optional: without the meshes and materials the draw-through runs on the frame's stand-ins.
+requires = [
+  { id = "pulsar.meshes.rows", optional = true },
+  { id = "pulsar.meshes.api", optional = true },
+  { id = "pulsar.materials.table", optional = true },
+  { id = "pulsar.materials.api", optional = true },
+]
 
 # The plugin's root crate (the package in this directory): the one place it
 # registers everything it contributes. A game links it without its `editor`
