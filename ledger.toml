@@ -35,7 +35,7 @@ status = "unfinished"
 [[pass]]
 crate = "helio-pass-portal-cull"
 in_default_graph = false
-reads = ["portal_views"]
+reads = ["PortalChainComponent::portals", "PortalChainComponent::portals::handles", "portal_views", "view_remaps"]
 owner = "helio-presets (mapping); helio-pass-portal-cull (algorithm)"
 disposition = "runs in the editor graph, but nothing authored feeds it: portals (Phase 4)"
 target_contract = "Phase 6; 03-gpu-reflection-and-rendering.md"
@@ -45,9 +45,29 @@ status = "unfinished"
 [[pass]]
 crate = "helio-pass-portal-instances"
 in_default_graph = false
-reads = ["portal_views"]
+reads = ["builtin_mesh_index", "builtin_mesh_vertex", "materials", "portal_views", "skeletal_bone_palette", "skeletal_skin_vertices"]
 owner = "helio-presets (mapping); helio-pass-portal-instances (algorithm)"
 disposition = "runs in the editor graph, but nothing authored feeds it: portals (Phase 4)"
 target_contract = "Phase 6; 03-gpu-reflection-and-rendering.md"
 test = "tracked in #1055; plugins/installed/tests/render_acceptance.rs (every_pass_of_the_editor_graph_runs)"
 status = "unfinished"
+
+[[buffer]]
+key = "PortalChainComponent::portals"
+producers = []
+consumers = ["helio-pass-portal-cull"]
+owner = "portals plugin (PortalChainComponent var-len column; contract PORTAL_CHAIN_PORTALS)"
+disposition = "keep: each chain's portal ids, read through the portals' contract const since p22 (was a string key the scan did not see)"
+target_contract = "Phase 3; .agents/PLUGIN_API_REFACTOR_PLAN.md section 14"
+test = "plugins/installed/tests/render_acceptance.rs (linked_portals_show_the_far_side_in_the_frame)"
+status = "verified"
+
+[[buffer]]
+key = "PortalChainComponent::portals::handles"
+producers = []
+consumers = ["helio-pass-portal-cull"]
+owner = "portals plugin (PortalChainComponent var-len handles; contract PORTAL_CHAIN_HANDLES)"
+disposition = "keep: each chain's offset and count into its portal ids, read through the portals' contract const since p22"
+target_contract = "Phase 3; .agents/PLUGIN_API_REFACTOR_PLAN.md section 14"
+test = "plugins/installed/tests/render_acceptance.rs (linked_portals_show_the_far_side_in_the_frame)"
+status = "verified"

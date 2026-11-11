@@ -56,11 +56,9 @@ mod tests {
                 features.ids()
             );
         }
-        assert!(
-            pulsar_settings::project::rendering::groups()
-                .iter()
-                .any(|group| std::ptr::eq(*group, &helio_pass_portal_cull::settings::PORTALS))
-        );
+        assert!(pulsar_settings::project::rendering::groups()
+            .iter()
+            .any(|group| std::ptr::eq(*group, &helio_pass_portal_cull::settings::PORTALS)));
         assert!(
             pulsar_plugins::registered::<engine_backend::scene::SpaceProducerRegistration>()
                 .any(|registration| registration.name == "portals")
@@ -75,10 +73,9 @@ mod tests {
             .into_iter()
             .filter(|summary| summary.origin == pulsar_plugins::origin!())
             .collect();
-        assert!(
-            ours.iter()
-                .any(|summary| summary.category == "component.class")
-        );
+        assert!(ours
+            .iter()
+            .any(|summary| summary.category == "component.class"));
         for summary in &ours {
             assert_eq!(
                 pulsar_plugins::plugin_of(summary.origin).map(|plugin| plugin.id.as_str()),
