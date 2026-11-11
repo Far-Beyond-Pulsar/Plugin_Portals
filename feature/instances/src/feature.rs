@@ -27,6 +27,16 @@ impl Feature for PortalFeature {
             helio_core::graph::type_name_of::<PortalCullPass>(),
             helio_core::graph::type_name_of::<PortalInstancePass>(),
         ]);
+        // The portal passes read the portal projection (the cull's tables),
+        // the mesh pools and the material table.
+        registrar.consumes(helio_pass_portal_cull::PORTAL_VIEWS);
+        registrar.consumes(helio_pass_portal_cull::PORTAL_CHAIN_HANDLES);
+        registrar.consumes(helio_pass_portal_cull::PORTAL_CHAIN_PORTALS);
+        registrar.consumes(helio_mesh_api::MESH_VERTICES);
+        registrar.consumes(helio_mesh_api::MESH_INDICES);
+        registrar.consumes(helio_mats::MATERIALS);
+        // p22: consumes skeletal_skin_vertices / skeletal_bone_palette once
+        // helio-mesh-api has a BufferContract for each.
         const CATEGORY: &str = "Passes: Geometry";
 
         registrar.node(

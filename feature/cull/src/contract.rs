@@ -34,6 +34,16 @@ pub const PORTAL_CHAIN_PORTAL_POOL_BUFFER: &str = "PortalChainComponent::portals
 /// SceneDB's generated per-row handle-table key for [`PORTAL_CHAIN_PORTAL_POOL_BUFFER`].
 pub const PORTAL_CHAIN_HANDLE_BUFFER: &str = "PortalChainComponent::portals::handles";
 
+/// [`PORTAL_CHAIN_HANDLE_BUFFER`] as a contract: one `VarLenHandle`
+/// (`offset`, `count`; two `u32`s) per chain row.
+pub const PORTAL_CHAIN_HANDLES: helio_core::BufferContract<[u32; 2]> =
+    helio_core::BufferContract::new(PORTAL_CHAIN_HANDLE_BUFFER);
+
+/// [`PORTAL_CHAIN_PORTAL_POOL_BUFFER`] as a contract: the chains' portal ids,
+/// one `u32` each, addressed by [`PORTAL_CHAIN_HANDLES`].
+pub const PORTAL_CHAIN_PORTALS: helio_core::BufferContract<u32> =
+    helio_core::BufferContract::new(PORTAL_CHAIN_PORTAL_POOL_BUFFER);
+
 /// One active portal's render data. 144 bytes.
 ///
 /// # WGSL equivalent
