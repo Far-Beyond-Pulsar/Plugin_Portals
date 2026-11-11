@@ -33,6 +33,10 @@ glam = { workspace = true }
 helio-core = { workspace = true }
 pulsar_scene_model = { workspace = true }
 pulsar_scenedb = { workspace = true }
+helio = { workspace = true }
+helio-graph-asset = { workspace = true }
+helio-presets = { workspace = true }
+pollster = "=0.4.0"
 
 [lints]
 workspace = true
