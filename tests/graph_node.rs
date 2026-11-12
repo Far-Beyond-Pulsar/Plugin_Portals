@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use engine_backend::subsystems::render::helio_renderer::{pipelines, render_features};
 use helio::{DebugDrawState, PassBuildContext, RendererConfig};
-use helio_graph_asset::{validate, GraphAsset, NodeInstance, PinKind};
+use helio_graph_asset::{GraphAsset, NodeInstance, PinKind, validate};
 use pulsar_scenedb::gpu::{EngineGpuContext, GpuMirrorHandle, SceneGpuConfig, SceneGpuStore};
 
 const PLUGIN: &str = "pulsar.portals";
@@ -20,10 +20,22 @@ const PLUGIN: &str = "pulsar.portals";
 /// What each node is: kind, the feature that registers it, and the pass type
 /// it builds (the end of the type's name), in default graph order.
 const NODES: &[(&str, &str, &str)] = &[
-    ("helio.pass.portal_cull", "helio.portal_cull", "PortalCullPass"),
+    (
+        "helio.pass.portal_cull",
+        "helio.portal_cull",
+        "PortalCullPass",
+    ),
     ("helio.pass.portal_mask", "helio.portals", "PortalMaskPass"),
-    ("helio.pass.portal_instance", "helio.portals", "PortalInstancePass"),
-    ("helio.pass.portal_editor_overlay", "helio.portals", "PortalEditorOverlayPass"),
+    (
+        "helio.pass.portal_instance",
+        "helio.portals",
+        "PortalInstancePass",
+    ),
+    (
+        "helio.pass.portal_editor_overlay",
+        "helio.portals",
+        "PortalEditorOverlayPass",
+    ),
 ];
 
 /// The plugin gate is process-wide state and a wgpu device is one at a time
@@ -77,7 +89,7 @@ fn registry() -> helio_graph_asset::NodeRegistry {
 
 /// The deferred preset's graph over the registry.
 fn default_asset(registry: &helio_graph_asset::NodeRegistry) -> GraphAsset {
-    helio_presets::graphs::deferred_graph_asset_for(registry, &configured())
+    helio_presets::graphs::deferred_graph_asset(registry)
 }
 
 /// Compiles `asset` and counts, per node of [`NODES`], the passes of its type
@@ -133,7 +145,10 @@ fn the_plugin_registers_its_nodes_in_the_default_graph_order() {
             .get(kind)
             .unwrap_or_else(|| panic!("{kind} is registered"));
         assert_eq!(registry.feature_of(kind), Some(*feature), "{kind}");
-        assert!(node.generated, "{kind}: pins come from what the pass declares");
+        assert!(
+            node.generated,
+            "{kind}: pins come from what the pass declares"
+        );
         assert!(node.params.iter().any(|p| p.key == "enabled"), "{kind}");
         let at = asset
             .nodes
@@ -161,7 +176,11 @@ fn the_graph_builds_the_passes_and_enabled_off_bypasses_them() {
     for ((kind, _, pass), count) in NODES.iter().zip(&built) {
         eprintln!("{kind} builds {count} {pass}");
     }
-    assert_eq!(built, vec![1, 1, 1, 1], "each node builds its pass (portals are on by default)");
+    assert_eq!(
+        built,
+        vec![1, 1, 1, 1],
+        "each node builds its pass (portals are on by default)"
+    );
 
     // The Enabled parameter bypasses every one of the plugin's nodes.
     for node in asset
