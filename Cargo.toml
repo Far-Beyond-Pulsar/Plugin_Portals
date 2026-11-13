@@ -37,6 +37,8 @@ helio = { workspace = true }
 helio-graph-asset = { workspace = true }
 helio-presets = { workspace = true }
 pollster = "=0.4.0"
+# The render graph node test (`tests/graph_node.rs`) makes its own device.
+wgpu = { workspace = true }
 
 [lints]
 workspace = true
