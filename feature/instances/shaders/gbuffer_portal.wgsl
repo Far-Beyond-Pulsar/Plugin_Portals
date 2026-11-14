@@ -222,7 +222,7 @@ fn vs_main(v: Vertex, @location(15) instance_index: u32, @builtin(vertex_index) 
     out.prev_clip_position = prev_clip;
     out.chain_idx          = chain_idx;
     out.pre_portal_position = pre_portal_position;
-    out.lightmap_uv        = GBUFFER_TAG_UNLIGHTMAPPED;
+    out.lightmap_uv        = GBUFFER_TAG_PLAIN;
     return out;
 }
 
@@ -364,7 +364,7 @@ fn fs_main(input: VertexOutput) -> GBufferOutput {
     out.emissive = vec4<f32>(surface.emissive, surface.specular_f0.b);
     // x = -1 reads as "no lightmap"; y carries the chain so lighting can shade this
     // pixel in the content's own world (-3 - chain index, below the -1/-2 tags).
-    out.lightmap_uv = gbuffer_tag_view_remap(input.chain_idx);
+    out.surface = gbuffer_tag_view_remap(input.chain_idx);
     out.sss = vec4<f32>(surface.subsurface_color, surface.subsurface_radius);
     out.extra = vec4<f32>(surface.roughness_aniso_x, surface.roughness_aniso_y,
                           surface.aniso_rotation, f32(surface.flags));
