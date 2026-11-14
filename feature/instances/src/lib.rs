@@ -468,8 +468,8 @@ impl RenderPass for PortalInstancePass {
             helio_core::ResourceKey::new(helio_frame_api::gbuffer::GROUP),
             "PortalInstance",
         )?;
-        let lightmap_uv = resources.read(
-            helio_core::ResourceKey::new(helio_frame_api::gbuffer::LIGHTMAP_UV),
+        let surface_tag = resources.read(
+            helio_core::ResourceKey::new(helio_frame_api::gbuffer::SURFACE),
             "PortalInstance",
         )?;
         let sss_target = resources.read(
@@ -516,7 +516,7 @@ impl RenderPass for PortalInstancePass {
                     ops: LOAD,
                 }),
                 Some(wgpu::RenderPassColorAttachment {
-                    view: lightmap_uv,
+                    view: surface_tag,
                     resolve_target: None,
                     depth_slice: None,
                     ops: LOAD,
