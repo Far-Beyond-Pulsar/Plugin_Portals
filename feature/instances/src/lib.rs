@@ -777,7 +777,7 @@ impl RenderPass for PortalInstancePass {
                 &mut entries,
                 2,
                 material_textures.texture_views,
-                material_textures.samplers,
+                material_textures.sampler,
             );
             self.bind_group_1 = Some(ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("PortalInstance BG 1"),
@@ -885,8 +885,10 @@ mod tests {
 
         assert!(!source.contains("wgpu_binding_array"));
         assert!(!source.contains("binding_array<"));
-        assert!(source.contains("@group(1) @binding(2) var scene_texture_0"));
-        assert!(source.contains("@group(1) @binding(5) var scene_sampler_1"));
+        assert!(source.contains("@group(1) @binding(2) var                   scene_sampler:"));
+        assert!(source.contains("@group(1) @binding(3) var scene_texture_0"));
+        assert!(source.contains("@group(1) @binding(4) var scene_texture_1"));
+        assert!(!source.contains("scene_sampler_"));
         assert!(source.contains("case 1u: { return textureSampleLevel"));
     }
 
