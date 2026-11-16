@@ -16,8 +16,9 @@
 //! 3. asks the frame for the inline view: the view's camera seen through
 //!    the opening's view map (`GpuCameraUniforms::through`), clipped at the
 //!    destination's plane, drawing into this view's G-buffer. Meshes, foliage,
-//!    decals, virtual geometry and terrain each cull and draw it with their
-//!    own programs, at their cost per view;
+//!    decals and virtual geometry each cull and draw it with their own
+//!    programs, at their cost per view (voxel terrain builds nothing in a
+//!    secondary view yet);
 //! 4. writes the inline view's depth back into the opening.
 //!
 //! A portal seen through a portal is this drawer running again inside the

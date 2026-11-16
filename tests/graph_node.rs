@@ -20,7 +20,11 @@ const PLUGIN: &str = "pulsar.portals";
 /// What each node is: kind, the feature that registers it, and the pass type
 /// it builds (the end of the type's name), in default graph order.
 const NODES: &[(&str, &str, &str)] = &[
-    ("helio.pass.portal_views", "helio.portals", "PortalViewsPass"),
+    (
+        "helio.pass.portal_views",
+        "helio.portals",
+        "PortalViewsPass",
+    ),
     (
         "helio.pass.portal_editor_overlay",
         "helio.portals",

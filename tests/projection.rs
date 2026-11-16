@@ -112,7 +112,13 @@ fn a_pair_publishes_an_opening_each_way_and_takes_no_table_slot() {
             .transform()
             .w_axis
             .truncate();
-        assert!(opening.content_to_drawn.transform_point3(partner).distance(here) < 1e-3);
+        assert!(
+            opening
+                .content_to_drawn
+                .transform_point3(partner)
+                .distance(here)
+                < 1e-3
+        );
     }
     // What a portal shows is a view of the frame, not content placed in a
     // coordinate space: the frame's table keeps only its own slots.
