@@ -36,7 +36,7 @@ use glam::{DMat4, DQuat, DVec3, Mat4};
 use helio_pass_portal_cull::components::PortalRow;
 use helio_pass_portal_cull::{
     PortalProjectionBridge, PortalProjectionConfig, PortalSettings, SubLevelContents,
-    SubLevelResolver, chain_set,
+    SubLevelResolver, chain_set_with_poses,
 };
 use helio_portal_api::{PORTAL_CHAIN_SET, PortalChainSet};
 use pulsar_scene_model::Visibility;
@@ -135,7 +135,7 @@ pub fn pair_portals(world: &World) -> Pairing {
 /// A portal's pose and opening: the object's world rotation and translation
 /// (relative to `origin`), and half the opening's extent scaled by the object's
 /// world scale along its own X and Y.
-fn pose_of(world: &World, portal: &Portal, origin: DVec3) -> Option<(Mat4, [f32; 2])> {
+fn pose_of(world: &World, portal: &Portal, origin: DVec3) -> Option<(DMat4, [f32; 2])> {
     let matrix = world_matrix_of(world, portal.owner)?;
     let (scale, rotation, translation) = matrix.to_scale_rotation_translation();
     if !(scale.x.is_finite() && scale.y.is_finite()) {
@@ -153,7 +153,7 @@ fn pose_of(world: &World, portal: &Portal, origin: DVec3) -> Option<(Mat4, [f32;
         (f64::from(portal.width) * scale.x.abs() * 0.5) as f32,
         (f64::from(portal.height) * scale.y.abs() * 0.5) as f32,
     ];
-    Some((pose.as_mat4(), half))
+    Some((pose, half))
 }
 
 /// The resolver for `pairing`: one sublevel (the default level, in which all
@@ -167,7 +167,7 @@ pub fn build_resolver(world: &World, pairing: &Pairing, origin: DVec3) -> SubLev
             };
             rows.push((
                 portal.instance,
-                PortalRow::new(Some(partner.instance), pose, half),
+                PortalRow::new(Some(partner.instance), pose.as_mat4(), half),
             ));
         }
     }
@@ -224,8 +224,16 @@ impl PortalSync {
             return PortalChainSet::default();
         }
         let resolver = build_resolver(world, &pairing, origin);
+        // The poses in f64 about the origin: the openings' maps compose from
+        // these, not the resolver's f32 rows.
+        let poses: std::collections::HashMap<_, _> = pairing
+            .pairs
+            .iter()
+            .flat_map(|(a, b)| [a, b])
+            .filter_map(|portal| Some((portal.instance, pose_of(world, portal, origin)?.0)))
+            .collect();
         match self.bridge.build(&resolver) {
-            Ok(frame) => chain_set(&frame),
+            Ok(frame) => chain_set_with_poses(&frame, |entity| poses.get(&entity).copied()),
             Err(error) => {
                 tracing::warn!("portals not drawn: {error}");
                 PortalChainSet::default()

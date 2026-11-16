@@ -43,6 +43,11 @@ pub fn portal_view_map(source: Mat4, target: Mat4) -> Mat4 {
     source * Mat4::from_rotation_y(std::f32::consts::PI) * target.inverse()
 }
 
+/// [`portal_view_map`] in f64 (poses relative to the frame's world origin).
+pub fn portal_view_map_f64(source: glam::DMat4, target: glam::DMat4) -> glam::DMat4 {
+    source * glam::DMat4::from_rotation_y(std::f64::consts::PI) * target.inverse()
+}
+
 // ── Portal pose ───────────────────────────────────────────────────────────────
 
 /// Position + orientation of a portal surface.

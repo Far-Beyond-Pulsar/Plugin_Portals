@@ -34,5 +34,5 @@ pub use components::PortalChain;
 pub use components::PortalProjectionCountsRow;
 pub use components::PortalRow;
 pub use components::PortalViewRow;
-pub use contract::{chain_set, GpuPortalView, PORTAL_VIEW_SNIPPET};
+pub use contract::{chain_set, chain_set_with_poses, GpuPortalView, PORTAL_VIEW_SNIPPET};
 pub mod components;

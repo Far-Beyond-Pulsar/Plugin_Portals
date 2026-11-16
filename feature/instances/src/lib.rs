@@ -22,7 +22,7 @@ pub use feature::PortalFeature;
 
 use std::collections::HashMap;
 
-use glam::{Mat4, Vec3, Vec4};
+use glam::{DMat4, DVec3, Mat4, Vec3, Vec4};
 use helio_core::graph::{ResourceBuilder, ResourceSize};
 use helio_core::{PassContext, PrepareContext, RenderPass, Result as HelioResult};
 use helio_pass_portal_cull::GpuPortalView;
@@ -46,10 +46,11 @@ const MASK_OPENING_COUNT: helio_core::ResourceKey<u32> =
 struct LiveChain {
     key: u64,
     openings: Vec<u32>,
-    content_to_drawn: Mat4,
+    /// Composed in f64 about the frame origin; f32 only once uploaded.
+    content_to_drawn: DMat4,
     /// The camera in the content space of each stage's source (before the
     /// stage's map): stage `s`'s opening is expressed there.
-    eyes: Vec<Vec3>,
+    eyes: Vec<DVec3>,
 }
 
 /// Whether the quad `corners` (frame space) lies in the frustum of
@@ -64,12 +65,12 @@ fn in_frustum(view_proj: Mat4, corners: &[Vec3; 4]) -> bool {
         || outside(&|c| c.w <= 0.0))
 }
 
-fn corners(opening: &PortalOpening) -> [Vec3; 4] {
-    let [hx, hy] = opening.half_extent.to_array();
+fn corners(opening: &PortalOpening) -> [DVec3; 4] {
+    let [hx, hy] = opening.half_extent.as_dvec2().to_array();
     [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].map(|(x, y)| {
         opening
             .transform
-            .transform_point3(Vec3::new(x * hx, y * hy, 0.0))
+            .transform_point3(DVec3::new(x * hx, y * hy, 0.0))
     })
 }
 
@@ -77,7 +78,7 @@ fn corners(opening: &PortalOpening) -> [Vec3; 4] {
 /// shallowest first, at most `cap`: each opening faced from its front and
 /// in the frustum where it is drawn, and its shorter prefix kept too (the
 /// prefix draws the wall the deeper opening is set in).
-fn visible_chains(set: &PortalChainSet, eye: Vec3, view_proj: Mat4, cap: usize) -> Vec<LiveChain> {
+fn visible_chains(set: &PortalChainSet, eye: DVec3, view_proj: Mat4, cap: usize) -> Vec<LiveChain> {
     let mut live: Vec<LiveChain> = Vec::new();
     let mut by_route: HashMap<Vec<u32>, usize> = HashMap::new();
     for route in &set.chains {
@@ -98,14 +99,16 @@ fn visible_chains(set: &PortalChainSet, eye: Vec3, view_proj: Mat4, cap: usize) 
         }
         // Walk outermost first: `outer` maps the current stage's source
         // space into the frame (the stages before it composed).
-        let mut outer = Mat4::IDENTITY;
+        let mut outer = DMat4::IDENTITY;
         let mut eyes = Vec::with_capacity(depth);
         let mut seen = true;
         for &index in &route.openings {
             let opening = &set.openings[index as usize];
             let eye_here = outer.inverse().transform_point3(eye);
             let local = opening.transform.inverse().transform_point3(eye_here);
-            let drawn = corners(opening).map(|corner| outer.transform_point3(corner));
+            // Drawn corners are where the camera sees them: near the frame
+            // origin, f32 for the frustum test.
+            let drawn = corners(opening).map(|corner| outer.transform_point3(corner).as_vec3());
             if local.z >= 0.0 || !in_frustum(view_proj, &drawn) {
                 seen = false;
                 break;
@@ -152,7 +155,7 @@ pub struct PortalChainsPass {
     chain_count: u32,
     opening_count: u32,
     /// Each live route's map last frame, by key (motion vectors).
-    previous: HashMap<u64, Mat4>,
+    previous: HashMap<u64, DMat4>,
     /// The most routes a frame draws (`PortalSettings::max_chains`).
     cap: usize,
     /// Whether the frame publishes chains (a graph member only then).
@@ -224,7 +227,7 @@ impl RenderPass for PortalChainsPass {
             self.live_chains.clear();
             return Ok(());
         };
-        let eye = Vec3::from_slice(&ctx.camera_data.position_near[..3]);
+        let eye = Vec3::from_slice(&ctx.camera_data.position_near[..3]).as_dvec3();
         let view_proj = Mat4::from_cols_array(&ctx.camera_data.view_proj);
         let live = visible_chains(&set, eye, view_proj, self.cap);
 
@@ -237,7 +240,7 @@ impl RenderPass for PortalChainsPass {
         for (remap, chain) in live.iter().enumerate() {
             let first_stage = stages.len() as u32;
             // Stage `s` sees content through the maps from `s` on.
-            let mut inner = Mat4::IDENTITY;
+            let mut inner = DMat4::IDENTITY;
             let mut stage_rows = Vec::with_capacity(chain.openings.len());
             for (s, &index) in chain.openings.iter().enumerate().rev() {
                 let opening = &set.openings[index as usize];
@@ -245,8 +248,8 @@ impl RenderPass for PortalChainsPass {
                 let to_local = opening.transform.inverse();
                 let eye = to_local.transform_point3(chain.eyes[s]);
                 stage_rows.push(GpuPortalStage {
-                    content_to_local: (to_local * inner).to_cols_array(),
-                    eye: eye.extend(0.0).to_array(),
+                    content_to_local: (to_local * inner).as_mat4().to_cols_array(),
+                    eye: eye.as_vec3().extend(0.0).to_array(),
                     half_extent: opening.half_extent.extend(0.0).extend(0.0).to_array(),
                 });
             }
@@ -263,9 +266,10 @@ impl RenderPass for PortalChainsPass {
                 let opening = &set.openings[*deeper.openings.last().expect("deeper") as usize];
                 let to_local = opening.transform.inverse();
                 stages.push(GpuPortalStage {
-                    content_to_local: to_local.to_cols_array(),
+                    content_to_local: to_local.as_mat4().to_cols_array(),
                     eye: to_local
                         .transform_point3(eye_in_content)
+                        .as_vec3()
                         .extend(0.0)
                         .to_array(),
                     half_extent: opening.half_extent.extend(0.0).extend(0.0).to_array(),
@@ -283,8 +287,8 @@ impl RenderPass for PortalChainsPass {
                 .unwrap_or(chain.content_to_drawn);
             previous.insert(chain.key, chain.content_to_drawn);
             chains.push(GpuPortalChain {
-                content_to_drawn: chain.content_to_drawn.to_cols_array(),
-                prev_content_to_drawn: prev.to_cols_array(),
+                content_to_drawn: chain.content_to_drawn.as_mat4().to_cols_array(),
+                prev_content_to_drawn: prev.as_mat4().to_cols_array(),
                 first_stage,
                 stage_count: chain.openings.len() as u32,
                 first_hole,
@@ -293,7 +297,7 @@ impl RenderPass for PortalChainsPass {
                 remap: remap as u32,
                 _pad: [0; 2],
             });
-            remaps.push(chain.content_to_drawn.inverse().to_cols_array());
+            remaps.push(chain.content_to_drawn.inverse().as_mat4().to_cols_array());
         }
         self.previous = previous;
         self.live_chains = live
@@ -301,8 +305,12 @@ impl RenderPass for PortalChainsPass {
             .map(|chain| helio_portal_api::LiveChain {
                 key: chain.key,
                 depth: chain.openings.len() as u32,
-                content_to_drawn: chain.content_to_drawn,
-                content_eye: chain.content_to_drawn.inverse().transform_point3(eye),
+                content_to_drawn: chain.content_to_drawn.as_mat4(),
+                content_eye: chain
+                    .content_to_drawn
+                    .inverse()
+                    .transform_point3(eye)
+                    .as_vec3(),
             })
             .collect();
         self.chain_count = chains.len() as u32;
@@ -654,10 +662,10 @@ mod tests {
     /// the side it is seen from), B 100 m along X facing -Z; A shows what is
     /// beside B, behind A.
     fn pair() -> PortalChainSet {
-        let a = Mat4::from_rotation_y(std::f32::consts::PI);
-        let b = Mat4::from_translation(Vec3::new(100.0, 0.0, 0.0));
-        let map_a = a * Mat4::from_rotation_y(std::f32::consts::PI) * b.inverse();
-        let opening = |transform: Mat4, content_to_drawn: Mat4| PortalOpening {
+        let a = DMat4::from_rotation_y(std::f64::consts::PI);
+        let b = DMat4::from_translation(DVec3::new(100.0, 0.0, 0.0));
+        let map_a = a * DMat4::from_rotation_y(std::f64::consts::PI) * b.inverse();
+        let opening = |transform: DMat4, content_to_drawn: DMat4| PortalOpening {
             transform,
             half_extent: Vec2::splat(1.0),
             content_to_drawn,
@@ -692,12 +700,38 @@ mod tests {
     fn only_routes_through_faced_openings_in_view_are_kept() {
         let set = pair();
         let eye = Vec3::new(0.0, 0.0, 5.0);
-        let live = visible_chains(&set, eye, camera(eye, Vec3::ZERO), 300);
+        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 300);
         assert_eq!(live.iter().map(|c| c.key).collect::<Vec<_>>(), [1]);
         // A route's map puts what is beside B behind A.
-        let beside_b = Vec3::new(100.0, 0.0, -2.0);
+        let beside_b = DVec3::new(100.0, 0.0, -2.0);
         let drawn = live[0].content_to_drawn.transform_point3(beside_b);
-        assert!(drawn.distance(Vec3::new(0.0, 0.0, -2.0)) < 1e-3, "{drawn}");
+        assert!(drawn.distance(DVec3::new(0.0, 0.0, -2.0)) < 1e-9, "{drawn}");
+    }
+
+    /// A pair 6000 km apart (a planet's span) composes in f64: content right
+    /// beside the far portal lands at the near one to well under a millimetre,
+    /// where an f32 composition misses by centimetres.
+    #[test]
+    fn far_apart_portals_compose_in_f64() {
+        let near = DMat4::from_rotation_y(std::f64::consts::PI);
+        let far = DMat4::from_translation(DVec3::new(6.0e6, 1234.5, -3.0e6));
+        let map = near * DMat4::from_rotation_y(std::f64::consts::PI) * far.inverse();
+        let set = PortalChainSet {
+            openings: vec![PortalOpening {
+                transform: near,
+                half_extent: Vec2::splat(1.0),
+                content_to_drawn: map,
+            }],
+            chains: vec![PortalRoute {
+                key: 1,
+                openings: vec![0],
+            }],
+        };
+        let eye = Vec3::new(0.0, 0.0, 5.0);
+        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 300);
+        let beside_far = DVec3::new(6.0e6, 1234.5, -3.0e6 - 2.0);
+        let drawn = live[0].content_to_drawn.transform_point3(beside_far);
+        assert!(drawn.distance(DVec3::new(0.0, 0.0, -2.0)) < 1e-6, "{drawn}");
     }
 
     /// A route past the budget is dropped, shallowest kept first.
@@ -705,7 +739,7 @@ mod tests {
     fn the_budget_keeps_the_shallowest_routes() {
         let set = pair();
         let eye = Vec3::new(0.0, 0.0, 5.0);
-        let live = visible_chains(&set, eye, camera(eye, Vec3::ZERO), 1);
+        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 1);
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].openings.len(), 1);
     }

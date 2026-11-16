@@ -26,7 +26,7 @@
 //!   ([`OCCURRENCE_ORDER`]), clipping with [`PORTAL_CHAIN_SNIPPET`] and
 //!   tagging what it draws with the chain's remap.
 
-use glam::{Mat4, Vec2};
+use glam::{DMat4, Vec2};
 
 /// The frame's portal chains, as a host publishes them ([`PORTAL_CHAIN_SET`]).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -44,16 +44,21 @@ impl PortalChainSet {
 }
 
 /// One opening (a portal surface seen from its front).
+///
+/// Its pose and map are f64, relative to the frame's world origin: a route's
+/// maps compose in f64 and become f32 once, where the chains are uploaded, so
+/// a portal pair kilometres apart (or far from the origin) does not lose the
+/// precision the composition needs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PortalOpening {
     /// The opening's pose (frame space): local Z negative on the side it is
     /// seen from, positive beyond.
-    pub transform: Mat4,
+    pub transform: DMat4,
     /// Half its extent in local X/Y.
     pub half_extent: Vec2,
     /// What it shows to where it shows it: the rigid map placing the place
     /// beyond its partner behind this opening.
-    pub content_to_drawn: Mat4,
+    pub content_to_drawn: DMat4,
 }
 
 /// One route through the openings.
