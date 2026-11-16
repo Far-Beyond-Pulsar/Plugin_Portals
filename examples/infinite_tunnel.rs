@@ -31,7 +31,6 @@
 
 mod common;
 
-use common::PortalComponent;
 use common::{
     box_mesh, flush_scene_db, make_material, new_scene_db_with_gpu_mirror, point_light,
     scene_db_handle, spawn_light, spawn_material, spawn_mesh, spawn_object,
@@ -372,22 +371,6 @@ impl ApplicationHandler for App {
 
         let near_entity = scene_db.world.spawn();
         let far_entity = scene_db.world.spawn();
-        scene_db.world.insert(
-            near_entity,
-            PortalComponent::from(helio_pass_portal_cull::PortalRow::new(
-                Some(far_entity),
-                pose_near.transform,
-                [HALF_WIDTH, HALF_HEIGHT],
-            )),
-        );
-        scene_db.world.insert(
-            far_entity,
-            PortalComponent::from(helio_pass_portal_cull::PortalRow::new(
-                Some(near_entity),
-                pose_far.transform,
-                [HALF_WIDTH, HALF_HEIGHT],
-            )),
-        );
         let mut resolver = SubLevelResolver::new();
         resolver.insert_sublevel(
             0,
@@ -417,15 +400,6 @@ impl ApplicationHandler for App {
             .expect("portal projection depth")
             .build(&resolver)
             .expect("portal projection");
-        let projection_entities = [near_entity, far_entity];
-        common::publish_portal_projection(
-            &mut scene_db.world,
-            &projection,
-            &projection_entities,
-            &projection_entities,
-            near_entity,
-        )
-        .expect("portal projection rows");
         common::set_projection_frame(&mut renderer, &projection);
 
         renderer.set_feature_live(helio::AmbientLight {

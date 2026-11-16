@@ -2,24 +2,20 @@
 name = "helio-pass-portal-instances"
 version = "0.1.0"
 edition = "2021"
-description = "Draws portal-duplicated instances (from helio-pass-portal-cull) into the G-buffer, clipped to each portal's opening"
+description = "What each portal shows: an inline view of the frame through its opening, drawn by every G-buffer drawer (recursive), and the editor overlay on the openings"
 
 [features]
 default = ["gpu"]
 gpu = []
 
 [dependencies]
-helio-mesh-api = { workspace = true }
 helio-frame-api = { workspace = true }
 helio-feature-api = { workspace = true }
 helio-core = { workspace = true }
-helio-mats = { workspace = true }
 helio-pass-portal-cull = { workspace = true }
-helio-pass-gbuffer = { workspace = true }
 wgpu = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }
-log = { workspace = true }
-pulsar_scenedb = { workspace = true }
+glam = { workspace = true }
 
 [dev-dependencies]
 naga = { version = "30", features = ["wgsl-in"] }

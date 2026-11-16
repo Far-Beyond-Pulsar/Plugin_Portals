@@ -65,10 +65,6 @@ pub fn new_scene_db_with_gpu_mirror_and(
         4096,
         device,
     );
-    PortalComponent::register_gpu_columns_growable(&mut gpu_store, 1024, device);
-    PortalViewComponent::register_gpu_columns_growable(&mut gpu_store, 1024, device);
-    PortalChainComponent::register_gpu_columns_growable(&mut gpu_store, 1024, device);
-    PortalProjectionCountsComponent::register_gpu_columns_growable(&mut gpu_store, 1, device);
     helio_light_host::LightComponent::register_gpu_columns_growable(
         &mut gpu_store,
         helio_light_api::MAX_LIGHTS,
@@ -492,7 +488,6 @@ pub fn preset() -> helio_presets::PresetGraph {
     helio_mesh_host::presets::with(
         helio_presets::Preset::Deferred,
         &helio_feature_api::FeatureSet::new()
-            .with(helio_pass_portal_cull::PortalCullFeature)
             .with(helio_pass_portal_instances::PortalFeature)
             // The lighting plugins' (Helio's presets list neither).
             .with(helio_pass_sky::SkyFeature)
@@ -501,223 +496,15 @@ pub fn preset() -> helio_presets::PresetGraph {
 }
 
 /// Hand `frame` (built with its own table, `PortalProjectionBridge::build`)
-/// to `renderer`: its spaces become the table, and its live counts the
-/// portal passes' `PORTAL_COUNTS` payload.
+/// to `renderer`: its direct openings become the portals' drawer's
+/// `PORTAL_OPENINGS` payload. Each visible opening renders as an inline view
+/// of the frame; portals seen through portals recurse there.
 pub fn set_projection_frame(
     renderer: &mut helio::Renderer,
     frame: &helio_pass_portal_cull::PortalProjectionFrame,
 ) {
-    renderer.set_coordinate_spaces(frame.renderer_coordinate_spaces());
     renderer.set_scene_payload(
-        &helio_pass_portal_cull::PORTAL_COUNTS,
-        std::sync::Arc::new(helio_pass_portal_cull::PortalCounts {
-            views: frame.counts.portal_view_count,
-            chains: frame.counts.portal_chain_count,
-        }),
+        &helio_pass_portal_cull::PORTAL_OPENINGS,
+        std::sync::Arc::new(helio_pass_portal_cull::PortalOpenings::from_frame(frame)),
     );
-}
-
-// The plugin's rows as standalone hosts author them (contract rows, as
-// `helio_components` does for Helio's own kinds).
-use pulsar_scenedb_derive::SceneStore;
-
-/// Ties a component to its contract row: same size, every field at the same
-/// offset, stored under the contract's key. Adds the conversions. (As
-/// `helio_components::same_layout!`, for rows Helio no longer has.)
-macro_rules! same_layout {
-    ($component:ident, $row:path, $contract:path, $key:literal; $($field:ident),* $(,)?) => {
-        const _: () = {
-            assert!(::core::mem::size_of::<$component>() == ::core::mem::size_of::<$row>());
-            assert!(::core::mem::align_of::<$component>() == ::core::mem::align_of::<$row>());
-            $(
-                assert!(
-                    ::core::mem::offset_of!($component, $field)
-                        == ::core::mem::offset_of!($row, $field)
-                );
-            )*
-            $contract.assert_producer::<$component>($key);
-        };
-
-        impl ::core::convert::From<$row> for $component {
-            fn from(row: $row) -> Self {
-                ::bytemuck::cast(row)
-            }
-        }
-
-        impl ::core::convert::From<$component> for $row {
-            fn from(component: $component) -> Self {
-                ::bytemuck::cast(component)
-            }
-        }
-
-        impl $component {
-            /// This component as its contract row.
-            pub fn row(&self) -> $row {
-                ::bytemuck::cast(*self)
-            }
-        }
-
-        impl ::core::ops::Deref for $component {
-            type Target = $row;
-            fn deref(&self) -> &$row {
-                ::bytemuck::cast_ref(self)
-            }
-        }
-
-        impl ::core::ops::DerefMut for $component {
-            fn deref_mut(&mut self) -> &mut $row {
-                ::bytemuck::cast_mut(self)
-            }
-        }
-    };
-}
-
-/// Authored portal relationship and local aperture data.
-///
-/// This is intentionally distinct from [`PortalViewComponent`] and
-/// [`PortalChainComponent`]. Those rows are derived GPU projections consumed by
-/// the current render passes; this row is the persistent SceneDB-facing source
-/// of truth. A portal can point to a peer in the same sublevel, another
-/// sublevel, or a nested actor context without storing a sublevel index of its
-/// own.
-#[derive(SceneStore, bytemuck::Pod, bytemuck::Zeroable, Clone, Copy, Debug, PartialEq)]
-#[repr(C)]
-#[gpu(layout = packed, buffer = "portals")]
-pub struct PortalComponent {
-    #[gpu]
-    pub peer: u64,
-    #[gpu]
-    pub flags: u32,
-    #[gpu]
-    pub _pad: u32,
-    #[gpu]
-    pub transform: [[f32; 4]; 4],
-    #[gpu]
-    pub half_extent: [f32; 2],
-}
-same_layout!(PortalComponent, helio_pass_portal_cull::PortalRow, helio_pass_portal_cull::PORTALS, "portals"; peer, flags, _pad, transform, half_extent);
-
-#[derive(SceneStore, bytemuck::Pod, bytemuck::Zeroable, Clone, Copy, Debug, PartialEq)]
-#[repr(C)]
-#[gpu(layout = packed, buffer = "portal_views")]
-pub struct PortalViewComponent {
-    #[gpu]
-    pub transform: [f32; 16],
-    #[gpu]
-    pub inverse_transform: [f32; 16],
-    #[gpu]
-    pub half_extent: [f32; 2],
-    #[gpu]
-    pub coordinate_space: u32,
-    /// Reserved compatibility word. Zero means the row is a physical portal
-    /// for legacy manually-authored rows. The projection bridge sets
-    /// [`Self::FLAG_MASK_HIDDEN`] on virtual nested rows so they can still be
-    /// referenced by a chain without being stamped as another opening.
-    #[gpu]
-    pub _pad: u32,
-}
-same_layout!(PortalViewComponent, helio_pass_portal_cull::PortalViewRow, helio_pass_portal_cull::PORTAL_VIEWS, "portal_views"; transform, inverse_transform, half_extent, coordinate_space, _pad);
-
-/// Derived frame counts for the portal projection tables.
-///
-/// The authored [`PortalComponent`] remains the source of truth. This row is
-/// published by the projection bridge alongside the dense derived view and
-/// chain rows so a renderer integration can distinguish active rows from a
-/// growable SceneDB buffer's reserved capacity without changing the authored
-/// data model.
-#[derive(SceneStore, bytemuck::Pod, bytemuck::Zeroable, Clone, Copy, Debug, PartialEq)]
-#[repr(C)]
-#[gpu(layout = packed, buffer = "portal_projection_counts")]
-pub struct PortalProjectionCountsComponent {
-    #[gpu]
-    pub portal_view_count: u32,
-    #[gpu]
-    pub portal_chain_count: u32,
-    #[gpu]
-    pub coordinate_space_count: u32,
-    #[gpu]
-    pub _pad: u32,
-}
-same_layout!(PortalProjectionCountsComponent, helio_pass_portal_cull::PortalProjectionCountsRow, helio_pass_portal_cull::PORTAL_PROJECTION_COUNTS, "portal_projection_counts"; portal_view_count, portal_chain_count, coordinate_space_count, _pad);
-
-impl From<helio_pass_portal_cull::GpuPortalView> for PortalViewComponent {
-    fn from(value: helio_pass_portal_cull::GpuPortalView) -> Self {
-        helio_pass_portal_cull::PortalViewRow::from(value).into()
-    }
-}
-
-impl From<PortalViewComponent> for helio_pass_portal_cull::GpuPortalView {
-    fn from(value: PortalViewComponent) -> Self {
-        helio_pass_portal_cull::PortalViewRow::from(value).into()
-    }
-}
-
-/// One derived portal chain ([`helio_pass_portal_cull::PortalChain`]),
-/// stored in the portal-chain pool the portal passes bind.
-///
-/// The chain is deliberately a variable-length SceneDB field. SceneDB mirrors
-/// `portals` through one growable `u32` payload pool and one growable
-/// `VarLenHandle` table; the renderer binds both buffers and uses the handle's
-/// `count` as the runtime recursion depth. This is the single representation
-/// for every depth, rather than a family of fixed `[u32; N]` component types.
-#[derive(SceneStore, Clone, Debug, PartialEq)]
-pub struct PortalChainComponent {
-    #[gpu(buffer = "PortalChainComponent::portals")]
-    pub portals: Vec<u32>,
-}
-
-impl From<helio_pass_portal_cull::PortalChain> for PortalChainComponent {
-    fn from(chain: helio_pass_portal_cull::PortalChain) -> Self {
-        Self {
-            portals: chain.portals,
-        }
-    }
-}
-
-/// Publish a portal projection's derived rows into `world`.
-///
-/// The portal GPU ABI is entity-indexed. Callers reserve a contiguous
-/// projection entity range whose entity indices match the dense row IDs, and
-/// keep those entities separate from authored portal entities. This does not
-/// spawn or repurpose entities: their lifetime stays with the host.
-pub fn publish_portal_projection(
-    world: &mut pulsar_scenedb::World,
-    frame: &helio_pass_portal_cull::PortalProjectionFrame,
-    view_entities: &[pulsar_scenedb::Entity],
-    chain_entities: &[pulsar_scenedb::Entity],
-    counts_entity: pulsar_scenedb::Entity,
-) -> Result<(), helio_pass_portal_cull::ProjectionError> {
-    use helio_pass_portal_cull::ProjectionError;
-    for (kind, expected, entities) in [
-        ("portal view", frame.portal_views.len(), view_entities),
-        ("portal chain", frame.portal_chains.len(), chain_entities),
-    ] {
-        if entities.len() != expected {
-            return Err(ProjectionError::SceneRowCount {
-                kind,
-                expected,
-                actual: entities.len(),
-            });
-        }
-        for (dense_index, entity) in entities.iter().enumerate() {
-            if entity.index() as usize != dense_index {
-                return Err(ProjectionError::NonDenseSceneRow {
-                    kind,
-                    dense_index,
-                    entity_index: entity.index(),
-                });
-            }
-        }
-    }
-    for (entity, row) in view_entities.iter().zip(&frame.portal_views) {
-        world.insert(*entity, PortalViewComponent::from(*row));
-    }
-    for (entity, chain) in chain_entities.iter().zip(&frame.portal_chains) {
-        world.insert(*entity, PortalChainComponent::from(chain.clone()));
-    }
-    world.insert(
-        counts_entity,
-        PortalProjectionCountsComponent::from(frame.counts),
-    );
-    Ok(())
 }

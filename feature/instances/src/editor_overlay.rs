@@ -12,7 +12,6 @@ use helio_core::{
     DebugViewDescriptor, PassContext, PayloadContract, PrepareContext, RenderPass,
     Result as HelioResult,
 };
-use pulsar_scenedb::gpu::BufferKey;
 
 /// Short world-anchored text rendered by the portal editor overlay.
 #[derive(Clone, Debug, PartialEq)]
@@ -51,9 +50,9 @@ pub struct PortalEditorOverlayPass {
     bind_group: Option<wgpu::BindGroup>,
     bind_group_key: Option<[wgpu::Buffer; 2]>,
     portal_count: u32,
-    /// Live portal views: the frame's `PORTAL_COUNTS`, or what a host set
-    /// by hand ([`Self::set_active_portal_count`]) when it publishes none.
-    active_portal_count: Option<u32>,
+    /// The frame's openings (`helio_pass_portal_cull::PORTAL_OPENINGS`),
+    /// as of the last membership check.
+    openings: Option<std::sync::Arc<helio_pass_portal_cull::PortalOpenings>>,
     editor_mode: bool,
     debug_texts: Vec<PortalDebugText>,
     glyph_buffer: wgpu::Buffer,
@@ -64,7 +63,8 @@ pub struct PortalEditorOverlayPass {
     ghost_vertices: Vec<[f64; 3]>,
     ghost_geometry_dirty: bool,
     ghost_world_origin: Option<[f64; 3]>,
-    fallback_portal_views: wgpu::Buffer,
+    /// The openings' rows the overlay draws (`GpuPortalView`), grown to fit.
+    rows: wgpu::Buffer,
 }
 
 impl PortalEditorOverlayPass {
@@ -292,7 +292,7 @@ impl PortalEditorOverlayPass {
             bind_group: None,
             bind_group_key: None,
             portal_count: 0,
-            active_portal_count: None,
+            openings: None,
             editor_mode: false,
             debug_texts: Vec::new(),
             glyph_buffer: device.create_buffer(&wgpu::BufferDescriptor {
@@ -313,18 +313,8 @@ impl PortalEditorOverlayPass {
             ghost_vertices: Vec::new(),
             ghost_geometry_dirty: true,
             ghost_world_origin: None,
-            fallback_portal_views: device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Portal Editor Empty Views"),
-                size: 144,
-                usage: wgpu::BufferUsages::STORAGE,
-                mapped_at_creation: false,
-            }),
+            rows: opening_rows(device, 1),
         }
-    }
-
-    /// Set the active dense portal-view row count for editor visualization.
-    pub fn set_active_portal_count(&mut self, count: u32) {
-        self.active_portal_count = Some(count);
     }
 
     /// Enable or disable the checkerboard indicator. Mirrors whatever
@@ -360,10 +350,6 @@ impl PortalEditorOverlayPass {
 }
 
 impl RenderPass for PortalEditorOverlayPass {
-    fn scene_buffers(&self) -> &'static [&'static str] {
-        &["portal_views"]
-    }
-
     fn name(&self) -> &'static str {
         "PortalEditorOverlay"
     }
@@ -373,7 +359,7 @@ impl RenderPass for PortalEditorOverlayPass {
     /// [`PORTAL_DEBUG_GEOMETRY`]).
     fn is_member(&mut self, scene: &mut helio_core::SceneContent<'_>) -> bool {
         if let Some(buffers) = scene.scene_buffers() {
-            self.active_portal_count = Some(helio_pass_portal_cull::portal_counts(buffers).views);
+            self.openings = helio_pass_portal_cull::portal_openings(buffers);
             let texts = buffers.payload(&PORTAL_DEBUG_TEXTS);
             if texts
                 .as_deref()
@@ -394,7 +380,7 @@ impl RenderPass for PortalEditorOverlayPass {
             }
         }
         self.editor_mode
-            && (self.active_portal_count.unwrap_or(0) > 0
+            && (self.openings.is_some()
                 || !self.debug_texts.is_empty()
                 || self.ghost_vertex_count > 0)
     }
@@ -487,10 +473,23 @@ impl RenderPass for PortalEditorOverlayPass {
     }
 
     fn prepare(&mut self, ctx: &PrepareContext) -> HelioResult<()> {
-        // Growable SceneDB storage exposes capacity, not live portal rows.
-        // An absent active count therefore means no authored/projected
-        // portals, not "draw the whole reserve".
-        self.portal_count = self.active_portal_count.unwrap_or(0);
+        // Every opening the frame publishes, whether or not this view sees
+        // through it.
+        let rows: Vec<helio_pass_portal_cull::GpuPortalView> = self
+            .openings
+            .iter()
+            .flat_map(|openings| openings.0.iter().map(|opening| opening.view))
+            .collect();
+        self.portal_count = rows.len() as u32;
+        let bytes =
+            (rows.len() * std::mem::size_of::<helio_pass_portal_cull::GpuPortalView>()) as u64;
+        if bytes > self.rows.size() {
+            self.rows = opening_rows(ctx.device, rows.len());
+            self.bind_group_key = None;
+        }
+        if !rows.is_empty() {
+            ctx.write_buffer(&self.rows, 0, bytemuck::cast_slice(&rows));
+        }
         let origin = ctx.world_origin.to_array();
         let glyphs = self
             .debug_texts
@@ -555,14 +554,7 @@ impl RenderPass for PortalEditorOverlayPass {
         let Some(mut pass) = ctx.render_cmds() else {
             return Ok(());
         };
-        let portal_views = ctx.scene_buffers.get(BufferKey::of("portal_views"));
-        if self.portal_count > 0 && portal_views.is_none() {
-            return Ok(());
-        }
-
-        let portal_view_buffer = portal_views
-            .map(|views| &views.buffer)
-            .unwrap_or(&self.fallback_portal_views);
+        let portal_view_buffer = &self.rows;
         let key = [ctx.camera.clone(), portal_view_buffer.clone()];
         if self.bind_group_key.as_ref() != Some(&key) {
             self.bind_group = Some(ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -710,4 +702,14 @@ fn glyph_rows(character: char) -> [u8; 7] {
             0b11111, 0b10001, 0b00010, 0b00100, 0b00100, 0b00000, 0b00100,
         ],
     }
+}
+
+/// A buffer of `count` opening rows.
+fn opening_rows(device: &wgpu::Device, count: usize) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Portal Editor Openings"),
+        size: (count.max(1) * std::mem::size_of::<helio_pass_portal_cull::GpuPortalView>()) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
 }

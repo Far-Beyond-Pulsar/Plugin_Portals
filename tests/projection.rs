@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use engine_backend::scene::{SpaceProducer, SpaceTable};
 use glam::{DVec3, Mat4};
-use helio_pass_portal_cull::PORTAL_COUNTS;
+use helio_pass_portal_cull::PORTAL_OPENINGS;
 use portals_component::{
     PortalComponent as AuthoredPortal, PortalProblem, PortalSync, pair_portals,
 };
@@ -88,7 +88,7 @@ fn a_hidden_or_disabled_portal_leaves_its_partner_alone() {
 }
 
 #[test]
-fn the_projection_gets_views_and_chains_through_the_shared_table() {
+fn a_pair_publishes_an_opening_each_way_and_takes_no_table_slot() {
     let mut world = World::new();
     portal_at(&mut world, 3, [0.0, 0.0, 0.0]);
     portal_at(&mut world, 3, [50.0, 0.0, 0.0]);
@@ -96,18 +96,27 @@ fn the_projection_gets_views_and_chains_through_the_shared_table() {
     let mut table = SpaceTable::new(vec![Mat4::IDENTITY, Mat4::IDENTITY]);
     let mut payloads = helio_core::ScenePayloads::default();
     sync.apply(&world, DVec3::ZERO, &mut table, &mut payloads);
-    let counts = payloads
-        .get(&PORTAL_COUNTS)
-        .expect("the counts are published");
-    let (views, chains) = (counts.views, counts.chains);
-    assert!(
-        views >= 2 && chains >= 2,
-        "a view and a chain per direction ({views}, {chains})"
-    );
-    assert!(
-        table.matrices().len() > 2,
-        "the projection's spaces came after the frame slot"
-    );
+    let openings = payloads
+        .get(&PORTAL_OPENINGS)
+        .expect("the openings are published");
+    assert_eq!(openings.0.len(), 2, "one opening per direction");
+    // Each opening's view map places what it shows beyond it: the partner's
+    // position lands at its own.
+    for opening in &openings.0 {
+        let here = opening.transform().w_axis.truncate();
+        let partner = openings
+            .0
+            .iter()
+            .find(|other| other.key != opening.key)
+            .unwrap()
+            .transform()
+            .w_axis
+            .truncate();
+        assert!(opening.content_to_drawn.transform_point3(partner).distance(here) < 1e-3);
+    }
+    // What a portal shows is a view of the frame, not content placed in a
+    // coordinate space: the frame's table keeps only its own slots.
+    assert_eq!(table.matrices().len(), 2);
     let mut again = helio_core::ScenePayloads::default();
     sync.apply(
         &world,
@@ -116,7 +125,7 @@ fn the_projection_gets_views_and_chains_through_the_shared_table() {
         &mut again,
     );
     assert!(
-        Arc::ptr_eq(&counts, &again.get(&PORTAL_COUNTS).unwrap()),
-        "unchanged counts are the same payload"
+        Arc::ptr_eq(&openings, &again.get(&PORTAL_OPENINGS).unwrap()),
+        "unchanged openings are the same payload"
     );
 }

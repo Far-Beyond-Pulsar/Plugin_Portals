@@ -1,6 +1,6 @@
 # Plugin_Portals
 
-Openings that show another place: their component, pairing and projection, settings and the renderer features that cull and draw through them.
+Openings that show another place: their component, pairing and projection, settings, and the renderer feature that draws what each opening shows as an inline view of the frame.
 
 `pulsar.portals` ("Portals") is a plugin of
 [Pulsar-Native](https://github.com/Far-Beyond-Pulsar/Pulsar-Native), the engine and editor that renders with
@@ -23,8 +23,8 @@ draw phases and api crates.
 | `portals_plugin` | `.` | Portals (`pulsar.portals`): the plugin's root crate, the one place it registers everything it contributes (runtime registrations always, the editor's with `editor`) |
 | `portals_editor` | `editor/` | Portals (pulsar.portals): the editor crate -- the viewport's portal diagnostics overlay, over the plugin's component crate |
 | `portals-examples` | `examples/` | The portals plugin's standalone hosts on Helio: portal demos |
-| `helio-pass-portal-cull` | `feature/cull/` | Per-portal GPU frustum culling: selects which instances get a duplicate draw through each active portal |
-| `helio-pass-portal-instances` | `feature/instances/` | Draws portal-duplicated instances (from helio-pass-portal-cull) into the G-buffer, clipped to each portal's opening |
+| `helio-pass-portal-cull` | `feature/cull/` | The portals' contracts (the frame's openings and their view maps) and the CPU projection of authored portals |
+| `helio-pass-portal-instances` | `feature/instances/` | What each portal shows: an inline view of the frame through its opening, drawn by every G-buffer drawer (recursive), and the editor overlay on the openings |
 
 The root crate (`portals_plugin`, this directory's package) is the one place
 the plugin registers what it contributes: its component classes, every
@@ -40,7 +40,7 @@ integration tests (`tests/`) link the root, as a game does.
 - **Requires**: nothing. A project enables or disables the plugin in its
   `Pulsar.toml` (`[plugins]`); disabled, the kind is absent and the frame
   draws without it.
-- **Reads other kinds through**: `helio-mats` (materials); `helio-mesh-api, helio-pass-gbuffer` (meshes).
+- **Reads other kinds through**: none. Every drawer of the frame (meshes, foliage, decals, virtual geometry) draws what a portal shows with its own program, from the opening's inline view (`helio_core::view`).
 - **Its standalone hosts also compose**: `helio-pass-gi` (gi); `helio-light-api, helio-light-host` (lights); `helio-mats` (materials); `helio-mesh-api, helio-mesh-host, helio-pass-forward-lit` (meshes); `helio-pass-sky` (sky) (demos and GPU tests
   draw a whole scene; the plugin itself does not depend on these).
 

@@ -22,7 +22,6 @@
 
 mod common;
 
-use common::PortalComponent;
 use common::{
     box_mesh, flush_scene_db, make_material, new_scene_db_with_gpu_mirror, point_light,
     scene_db_handle, spawn_light, spawn_material, spawn_mesh, spawn_object,
@@ -31,10 +30,7 @@ use helio::{
     required_experimental_features, required_wgpu_features, required_wgpu_limits, Camera, Renderer,
     RendererBuilder, RendererConfig,
 };
-use helio_pass_portal_cull::{
-    PortalProjectionBridge, PortalProjectionConfig, SubLevelContents, SubLevelResolver,
-    MAX_PORTAL_CHAINS,
-};
+use helio_pass_portal_cull::{PortalProjectionBridge, SubLevelContents, SubLevelResolver};
 use pulsar_scenedb::{Entity, SceneDb};
 
 use winit::{
@@ -52,14 +48,17 @@ use std::sync::Arc;
 /// Room interior half-extent — the room spans [-HALF_SIZE, HALF_SIZE] on
 /// every axis, so it's a 2*HALF_SIZE cube.
 const HALF_SIZE: f32 = 6.0;
-/// Runtime recursive view depth for the demo. The chain row budget below is
-/// separate: six mutually visible portals otherwise produce an exponential
-/// number of valid paths before GPU culling can discard them.
-const PORTAL_RECURSION_DEPTH: usize = 10;
-/// Set `CUBE_UNCAPPED_RECURSION=1` to remove the chain-row budget. Recursive
-/// expansion is still visibility-driven, so invisible portal branches are
-/// rejected before they become SceneDB/GPU rows.
+/// How deep the demo's portals nest (a portal seen through a portal is a view
+/// inside a view, `helio_core::ViewBudget::max_depth`), and how many views a
+/// frame renders: six mutually visible portals multiply at every level, and
+/// each view is a G-buffer pass of its own. Openings a view does not see cost
+/// no pass.
+const PORTAL_RECURSION_DEPTH: u32 = 4;
+const PORTAL_VIEWS: u32 = 32;
+/// Set `CUBE_UNCAPPED_RECURSION=1` for the deep budget.
 const UNCAPPED_RECURSION_ENV: &str = "CUBE_UNCAPPED_RECURSION";
+const UNCAPPED_RECURSION_DEPTH: u32 = 8;
+const UNCAPPED_VIEWS: u32 = 128;
 /// Doorway half-width (local X) / half-height (local Y) in each wall's own
 /// face-local frame — also the portal clip opening's half-extent.
 const DOOR_HALF_W: f32 = 1.6;
@@ -115,9 +114,6 @@ struct AppState {
     mouse_delta: (f32, f32),
 
     scene_db: SceneDb,
-    portal_resolver: SubLevelResolver,
-    portal_projection_bridge: PortalProjectionBridge,
-    portal_projection_entities: Vec<Entity>,
     _light_ids: Vec<Entity>,
 
     /// Debug-only: when `CUBE_SCREENSHOT` is set, counts frames so a single
@@ -165,6 +161,21 @@ impl ApplicationHandler for App {
         let format = graphics.surface_config.format;
 
         let mut config = RendererConfig::new(size.width, size.height, format);
+        // Portals seen through portals are views inside views: the frame's
+        // budget bounds how deep, and how many (`helio_core::ViewBudget`).
+        let uncapped_recursion = std::env::var_os(UNCAPPED_RECURSION_ENV).is_some();
+        config.views = if uncapped_recursion {
+            helio_core::ViewBudget {
+                max_depth: UNCAPPED_RECURSION_DEPTH,
+                max_views: UNCAPPED_VIEWS,
+            }
+        } else {
+            helio_core::ViewBudget {
+                max_depth: PORTAL_RECURSION_DEPTH,
+                max_views: PORTAL_VIEWS,
+            }
+        };
+        log::info!("[portal_cube] view budget {:?}", config.views);
         let mut scene_db = new_scene_db_with_gpu_mirror(&device, &queue);
         let graph_scene_db = scene_db_handle(&scene_db);
         let mut renderer = RendererBuilder::new(config, graph_scene_db.clone())
@@ -172,25 +183,6 @@ impl ApplicationHandler for App {
             .build_with_graphics_context(&mut graphics)
             .expect("Helio renderer");
         let surface = graphics.surface;
-
-        let uncapped_recursion = std::env::var_os(UNCAPPED_RECURSION_ENV).is_some();
-        let chain_budget = (!uncapped_recursion).then_some(MAX_PORTAL_CHAINS);
-        let projection_capacity = MAX_PORTAL_CHAINS;
-        log::info!(
-            "[portal_cube] recursion depth={} chain budget={:?} dense row reserve={}",
-            PORTAL_RECURSION_DEPTH,
-            chain_budget,
-            projection_capacity
-        );
-
-        // Reserve dense derived rows before authored portal and scene rows.
-        // Authored portal entities remain separate from the GPU projection
-        // entities populated by the resolver bridge below. In uncapped mode
-        // the active rows are rebuilt from camera-visible portal paths each
-        // frame; this reserve is only the existing dense SceneDB row arena.
-        let projection_entities: Vec<Entity> = (0..projection_capacity)
-            .map(|_| scene_db.world.spawn())
-            .collect();
 
         // ── Materials ───────────────────────────────────────────────────────
         let wall_mat = spawn_material(
@@ -256,13 +248,12 @@ impl ApplicationHandler for App {
             // not rely on a hidden continuation marker.
             let pose = helio_pass_portal_cull::portal_pose_facing(normal * HALF_SIZE, -normal, up);
             let entity = authored_portal_entities[i];
-            let component = PortalComponent::from(helio_pass_portal_cull::PortalRow::new(
+            let row = helio_pass_portal_cull::PortalRow::new(
                 Some(authored_portal_entities[opposite_face[i]]),
                 pose.transform,
                 [DOOR_HALF_W, DOOR_HALF_H],
-            ));
-            scene_db.world.insert(entity, component);
-            authored_portals.push((entity, component));
+            );
+            authored_portals.push((entity, row));
         }
 
         // A central ordinary scene object makes the mapped level contents
@@ -281,14 +272,8 @@ impl ApplicationHandler for App {
         let mut resolver = SubLevelResolver::new();
         resolver.insert_sublevel(
             0,
-            SubLevelContents::new([], authored_portals.iter().map(|(e, p)| (*e, p.row()))),
+            SubLevelContents::new([], authored_portals.iter().map(|(e, p)| (*e, *p))),
         );
-        let projection_bridge = PortalProjectionBridge::with_config(PortalProjectionConfig {
-            max_chain_depth: PORTAL_RECURSION_DEPTH,
-            max_chains: chain_budget,
-            max_coordinate_spaces: None,
-        })
-        .expect("portal_cube projection depth");
         let initial_position = if std::env::var("CUBE_CLOSEUP").is_ok() {
             Vec3::new(0.0, 0.8, 4.3)
         } else {
@@ -304,24 +289,12 @@ impl ApplicationHandler for App {
         } else {
             -0.488
         };
-        let initial_aspect = size.width as f32 / size.height.max(1) as f32;
-        let (_, initial_camera) =
-            cube_camera(initial_position, initial_yaw, initial_pitch, initial_aspect);
-        let projection_frame = projection_bridge
-            .build_visible_from_camera(
-                &resolver,
-                initial_camera.view_proj_in(glam::DVec3::ZERO),
-                initial_position,
-            )
+        // The openings are where the portals are: published once, they render
+        // as views of every frame.
+        let projection_frame = PortalProjectionBridge::new(1)
+            .expect("portal_cube projection depth")
+            .build(&resolver)
             .expect("portal_cube authored portal graph");
-        common::publish_portal_projection(
-            &mut scene_db.world,
-            &projection_frame,
-            &projection_entities[..projection_frame.portal_views.len()],
-            &projection_entities[..projection_frame.portal_chains.len()],
-            projection_entities[0],
-        )
-        .expect("portal_cube dense projection rows");
         common::set_projection_frame(&mut renderer, &projection_frame);
 
         // ── A light near the center so every wall reads, plus one per
@@ -402,9 +375,6 @@ impl ApplicationHandler for App {
             cursor_grabbed: false,
             mouse_delta: (0.0, 0.0),
             scene_db,
-            portal_resolver: resolver,
-            portal_projection_bridge: projection_bridge,
-            portal_projection_entities: projection_entities,
             _light_ids: light_ids,
             frame_count: 0,
         });
@@ -559,49 +529,6 @@ impl AppState {
         let aspect = size.width as f32 / size.height.max(1) as f32;
 
         let (_, camera) = cube_camera(self.cam_pos, self.cam_yaw, self.cam_pitch, aspect);
-
-        let projection_result = self.portal_projection_bridge.build_visible_from_camera(
-            &self.portal_resolver,
-            camera.view_proj_in(glam::DVec3::ZERO),
-            self.cam_pos,
-        );
-        match projection_result {
-            Ok(projection_frame) => {
-                let view_count = projection_frame.portal_views.len();
-                let chain_count = projection_frame.portal_chains.len();
-                if view_count <= self.portal_projection_entities.len()
-                    && chain_count <= self.portal_projection_entities.len()
-                {
-                    if self.frame_count < 2 {
-                        log::info!(
-                            "[portal_cube] visible projection frame: views={} chains={} depth={}",
-                            view_count,
-                            chain_count,
-                            PORTAL_RECURSION_DEPTH,
-                        );
-                    }
-                    common::publish_portal_projection(
-                        &mut self.scene_db.world,
-                        &projection_frame,
-                        &self.portal_projection_entities[..view_count],
-                        &self.portal_projection_entities[..chain_count],
-                        self.portal_projection_entities[0],
-                    )
-                    .expect("portal_cube visible projection rows");
-                    common::set_projection_frame(&mut self.renderer, &projection_frame);
-                } else {
-                    log::warn!(
-                        "[portal_cube] visible projection rows exceed dense row arena: views={} chains={} capacity={}",
-                        view_count,
-                        chain_count,
-                        self.portal_projection_entities.len()
-                    );
-                }
-            }
-            Err(error) => {
-                log::error!("[portal_cube] visible portal traversal failed: {error}");
-            }
-        }
 
         // SceneDB is the authoritative scene. Publish all component rows
         // (including the mesh/material/object rows created at startup) before
