@@ -107,11 +107,16 @@ fn a_pair_publishes_its_chains_and_takes_no_table_slot() {
         .filter(|route| route.openings.len() == 1)
         .collect();
     assert_eq!(direct.len(), 2, "one direct route per direction");
-    assert!(chains.chains.len() > 2, "routes through both portals in turn");
-    assert!(chains
-        .chains
-        .windows(2)
-        .all(|pair| pair[0].openings.len() <= pair[1].openings.len()));
+    assert!(
+        chains.chains.len() > 2,
+        "routes through both portals in turn"
+    );
+    assert!(
+        chains
+            .chains
+            .windows(2)
+            .all(|pair| pair[0].openings.len() <= pair[1].openings.len())
+    );
     // Each direct opening's map places what it shows beyond it: the
     // partner's position lands at its own.
     for route in &direct {
@@ -125,7 +130,13 @@ fn a_pair_publishes_its_chains_and_takes_no_table_slot() {
             .transform
             .w_axis
             .truncate();
-        assert!(opening.content_to_drawn.transform_point3(partner).distance(here) < 1e-3);
+        assert!(
+            opening
+                .content_to_drawn
+                .transform_point3(partner)
+                .distance(here)
+                < 1e-3
+        );
     }
     // What a portal shows carries its own map: the frame's table keeps only
     // its own slots.

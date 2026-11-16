@@ -173,7 +173,7 @@ fn the_graph_builds_the_passes_and_enabled_off_bypasses_them() {
     }
     assert_eq!(
         built,
-        vec![1, 1, 1, 1],
+        vec![1; NODES.len()],
         "each node builds its pass (portals are on by default)"
     );
 

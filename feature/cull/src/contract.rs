@@ -100,7 +100,10 @@ pub fn chain_set(frame: &PortalProjectionFrame) -> PortalChainSet {
         .map(|chain| {
             let mut hasher = DefaultHasher::new();
             for &view in &chain.portals {
-                keys.get(view as usize).copied().unwrap_or(0).hash(&mut hasher);
+                keys.get(view as usize)
+                    .copied()
+                    .unwrap_or(0)
+                    .hash(&mut hasher);
             }
             PortalRoute {
                 key: hasher.finish(),

@@ -48,17 +48,12 @@ use std::sync::Arc;
 /// Room interior half-extent — the room spans [-HALF_SIZE, HALF_SIZE] on
 /// every axis, so it's a 2*HALF_SIZE cube.
 const HALF_SIZE: f32 = 6.0;
-/// How deep the demo's portals nest (a portal seen through a portal is a view
-/// inside a view, `helio_core::ViewBudget::max_depth`), and how many views a
-/// frame renders: six mutually visible portals multiply at every level, and
-/// each view is a G-buffer pass of its own. Openings a view does not see cost
-/// no pass.
-const PORTAL_RECURSION_DEPTH: u32 = 4;
-const PORTAL_VIEWS: u32 = 32;
-/// Set `CUBE_UNCAPPED_RECURSION=1` for the deep budget.
+/// Set `CUBE_UNCAPPED_RECURSION=1` for the deep budget: routes five openings
+/// deep, as many as a frame can draw through (six mutually visible portals
+/// multiply at every level; the chains pass keeps the shallowest). The
+/// default is the project default (`PortalSettings::default`, three deep).
 const UNCAPPED_RECURSION_ENV: &str = "CUBE_UNCAPPED_RECURSION";
-const UNCAPPED_RECURSION_DEPTH: u32 = 8;
-const UNCAPPED_VIEWS: u32 = 128;
+const UNCAPPED_RECURSION_DEPTH: usize = 5;
 /// Doorway half-width (local X) / half-height (local Y) in each wall's own
 /// face-local frame — also the portal clip opening's half-extent.
 const DOOR_HALF_W: f32 = 1.6;
@@ -160,22 +155,16 @@ impl ApplicationHandler for App {
         let queue = graphics.queue.clone();
         let format = graphics.surface_config.format;
 
-        let mut config = RendererConfig::new(size.width, size.height, format);
-        // Portals seen through portals are views inside views: the frame's
-        // budget bounds how deep, and how many (`helio_core::ViewBudget`).
-        let uncapped_recursion = std::env::var_os(UNCAPPED_RECURSION_ENV).is_some();
-        config.views = if uncapped_recursion {
-            helio_core::ViewBudget {
-                max_depth: UNCAPPED_RECURSION_DEPTH,
-                max_views: UNCAPPED_VIEWS,
-            }
-        } else {
-            helio_core::ViewBudget {
-                max_depth: PORTAL_RECURSION_DEPTH,
-                max_views: PORTAL_VIEWS,
-            }
-        };
-        log::info!("[portal_cube] view budget {:?}", config.views);
+        // How deep portals seen through portals go, and how many routes a
+        // frame draws through (`PortalSettings`).
+        let mut portals = helio_pass_portal_cull::PortalSettings::default();
+        if std::env::var_os(UNCAPPED_RECURSION_ENV).is_some() {
+            portals.max_chain_depth = UNCAPPED_RECURSION_DEPTH;
+            portals.max_chains = helio_portal_api::MAX_CHAINS as usize;
+        }
+        log::info!("[portal_cube] portals {portals:?}");
+        let config =
+            RendererConfig::new(size.width, size.height, format).with_feature(portals.clone());
         let mut scene_db = new_scene_db_with_gpu_mirror(&device, &queue);
         let graph_scene_db = scene_db_handle(&scene_db);
         let mut renderer = RendererBuilder::new(config, graph_scene_db.clone())
@@ -289,9 +278,8 @@ impl ApplicationHandler for App {
         } else {
             -0.488
         };
-        // The openings are where the portals are: published once, they render
-        // as views of every frame.
-        let projection_frame = PortalProjectionBridge::new(1)
+        // The openings and every route through them, published once.
+        let projection_frame = PortalProjectionBridge::new(portals.max_chain_depth)
             .expect("portal_cube projection depth")
             .build(&resolver)
             .expect("portal_cube authored portal graph");

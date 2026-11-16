@@ -396,10 +396,12 @@ impl ApplicationHandler for App {
                 ],
             ),
         );
-        let projection = PortalProjectionBridge::new(1)
-            .expect("portal projection depth")
-            .build(&resolver)
-            .expect("portal projection");
+        let projection = PortalProjectionBridge::new(
+            helio_pass_portal_cull::PortalSettings::default().max_chain_depth,
+        )
+        .expect("portal projection depth")
+        .build(&resolver)
+        .expect("portal projection");
         common::set_projection_frame(&mut renderer, &projection);
 
         renderer.set_feature_live(helio::AmbientLight {

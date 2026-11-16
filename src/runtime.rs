@@ -51,13 +51,11 @@ mod tests {
         let features =
             engine_backend::subsystems::render::helio_renderer::render_features::plugin_features();
         // The chains, the mask and the overlay (the cull crate holds no pass).
-        for id in ["helio.portals"] {
-            assert!(
-                features.ids().contains(&id),
-                "{id}: features {:?}",
-                features.ids()
-            );
-        }
+        assert!(
+            features.ids().contains(&"helio.portals"),
+            "features {:?}",
+            features.ids()
+        );
         assert!(
             pulsar_settings::project::rendering::groups()
                 .iter()

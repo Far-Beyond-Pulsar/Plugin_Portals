@@ -66,8 +66,11 @@ fn in_frustum(view_proj: Mat4, corners: &[Vec3; 4]) -> bool {
 
 fn corners(opening: &PortalOpening) -> [Vec3; 4] {
     let [hx, hy] = opening.half_extent.to_array();
-    [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
-        .map(|(x, y)| opening.transform.transform_point3(Vec3::new(x * hx, y * hy, 0.0)))
+    [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].map(|(x, y)| {
+        opening
+            .transform
+            .transform_point3(Vec3::new(x * hx, y * hy, 0.0))
+    })
 }
 
 /// The routes of `set` the camera (`eye`, `view_proj`, frame space) can see,
@@ -82,7 +85,12 @@ fn visible_chains(set: &PortalChainSet, eye: Vec3, view_proj: Mat4, cap: usize) 
             break;
         }
         let depth = route.openings.len();
-        if depth == 0 || route.openings.iter().any(|&i| i as usize >= set.openings.len()) {
+        if depth == 0
+            || route
+                .openings
+                .iter()
+                .any(|&i| i as usize >= set.openings.len())
+        {
             continue;
         }
         if depth > 1 && !by_route.contains_key(&route.openings[..depth - 1]) {
@@ -193,7 +201,11 @@ impl RenderPass for PortalChainsPass {
     }
 
     fn writes(&self) -> &'static [&'static str] {
-        &[PORTAL_CHAINS, PORTAL_STAGES, helio_frame_api::lighting::VIEW_REMAPS]
+        &[
+            PORTAL_CHAINS,
+            PORTAL_STAGES,
+            helio_frame_api::lighting::VIEW_REMAPS,
+        ]
     }
 
     fn render_pass_descriptor<'a>(
@@ -252,7 +264,10 @@ impl RenderPass for PortalChainsPass {
                 let to_local = opening.transform.inverse();
                 stages.push(GpuPortalStage {
                     content_to_local: to_local.to_cols_array(),
-                    eye: to_local.transform_point3(eye_in_content).extend(0.0).to_array(),
+                    eye: to_local
+                        .transform_point3(eye_in_content)
+                        .extend(0.0)
+                        .to_array(),
                     half_extent: opening.half_extent.extend(0.0).extend(0.0).to_array(),
                 });
             }
@@ -261,7 +276,11 @@ impl RenderPass for PortalChainsPass {
             if stamped.insert(outer, ()).is_none() {
                 openings.push(GpuPortalView::of(&set.openings[outer as usize], outer));
             }
-            let prev = self.previous.get(&chain.key).copied().unwrap_or(chain.content_to_drawn);
+            let prev = self
+                .previous
+                .get(&chain.key)
+                .copied()
+                .unwrap_or(chain.content_to_drawn);
             previous.insert(chain.key, chain.content_to_drawn);
             chains.push(GpuPortalChain {
                 content_to_drawn: chain.content_to_drawn.to_cols_array(),
@@ -288,9 +307,24 @@ impl RenderPass for PortalChainsPass {
             .collect();
         self.chain_count = chains.len() as u32;
         self.opening_count = openings.len() as u32;
-        fit(ctx.device, &mut self.chains, (chains.len() * 160) as u64, "Portal Chains");
-        fit(ctx.device, &mut self.stages, (stages.len() * 96) as u64, "Portal Stages");
-        fit(ctx.device, &mut self.openings, (openings.len() * 144) as u64, "Portal Mask Openings");
+        fit(
+            ctx.device,
+            &mut self.chains,
+            (chains.len() * 160) as u64,
+            "Portal Chains",
+        );
+        fit(
+            ctx.device,
+            &mut self.stages,
+            (stages.len() * 96) as u64,
+            "Portal Stages",
+        );
+        fit(
+            ctx.device,
+            &mut self.openings,
+            (openings.len() * 144) as u64,
+            "Portal Mask Openings",
+        );
         if !chains.is_empty() {
             ctx.write_buffer(&self.chains, 0, bytemuck::cast_slice(&chains));
             ctx.write_buffer(&self.stages, 0, bytemuck::cast_slice(&stages));
@@ -307,10 +341,12 @@ impl RenderPass for PortalChainsPass {
     fn publish<'a>(&self, frame: &mut helio_core::ResourceRegistry<'a>) {
         // SAFETY: the buffers are this pass's, owned by the graph past the
         // frame's registry, as every pass's publication.
-        let own = |buffer: &wgpu::Buffer| -> &'a wgpu::Buffer { unsafe { std::mem::transmute(buffer) } };
-        let own_chains = |chains: &[helio_portal_api::LiveChain]| -> &'a [helio_portal_api::LiveChain] {
-            unsafe { std::mem::transmute(chains) }
-        };
+        let own =
+            |buffer: &wgpu::Buffer| -> &'a wgpu::Buffer { unsafe { std::mem::transmute(buffer) } };
+        let own_chains =
+            |chains: &[helio_portal_api::LiveChain]| -> &'a [helio_portal_api::LiveChain] {
+                unsafe { std::mem::transmute(chains) }
+            };
         frame.write(PORTAL_CHAIN_COUNT, self.chain_count, "PortalChains");
         frame.write(MASK_OPENING_COUNT, self.opening_count, "PortalChains");
         frame.write(
@@ -328,7 +364,11 @@ impl RenderPass for PortalChainsPass {
             (MASK_OPENINGS, own(&self.openings)),
         ] {
             frame.write_buffer_binding(name, buffer, "PortalChains");
-            frame.write(helio_core::ResourceKey::<&wgpu::Buffer>::new(name), buffer, "PortalChains");
+            frame.write(
+                helio_core::ResourceKey::<&wgpu::Buffer>::new(name),
+                buffer,
+                "PortalChains",
+            );
         }
     }
 }
@@ -512,7 +552,7 @@ impl RenderPass for PortalMaskPass {
             (_, Some(openings)) => Some(
                 self.stamp_group
                     .get_or_create(
-                        &ctx.device,
+                        ctx.device,
                         &wgpu::BindGroupDescriptor {
                             label: Some("PortalMask Stamp BG"),
                             layout: &self.stamp_layout,
@@ -534,7 +574,7 @@ impl RenderPass for PortalMaskPass {
         let clear = self
             .clear_group
             .get_or_create(
-                &ctx.device,
+                ctx.device,
                 &wgpu::BindGroupDescriptor {
                     label: Some("PortalMask Clear BG"),
                     layout: &self.clear_layout,
@@ -625,9 +665,18 @@ mod tests {
         PortalChainSet {
             openings: vec![opening(a, map_a), opening(b, map_a.inverse())],
             chains: vec![
-                PortalRoute { key: 1, openings: vec![0] },
-                PortalRoute { key: 2, openings: vec![1] },
-                PortalRoute { key: 3, openings: vec![0, 1] },
+                PortalRoute {
+                    key: 1,
+                    openings: vec![0],
+                },
+                PortalRoute {
+                    key: 2,
+                    openings: vec![1],
+                },
+                PortalRoute {
+                    key: 3,
+                    openings: vec![0, 1],
+                },
             ],
         }
     }

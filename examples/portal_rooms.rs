@@ -391,10 +391,12 @@ impl ApplicationHandler for App {
             0,
             SubLevelContents::new([], authored_portals.iter().map(|(e, p)| (*e, *p))),
         );
-        let projection_frame = PortalProjectionBridge::new(1)
-            .expect("portal_rooms projection depth")
-            .build(&resolver)
-            .expect("portal_rooms authored portal graph");
+        let projection_frame = PortalProjectionBridge::new(
+            helio_pass_portal_cull::PortalSettings::default().max_chain_depth,
+        )
+        .expect("portal_rooms projection depth")
+        .build(&resolver)
+        .expect("portal_rooms authored portal graph");
         common::set_projection_frame(&mut renderer, &projection_frame);
 
         // ── A light near the hub's center so its own walls read clearly.
