@@ -4,12 +4,15 @@
 # (`pulsar_plugins::installed!`).
 id = "pulsar.portals"
 name = "Portals"
-description = "Openings that show another place: their component, pairing and projection, settings, and the renderer feature that draws what each opening shows as an inline view of the frame"
+description = "Openings that show another place: their component, pairing and projection, settings, and the renderer feature that publishes the chains every drawer draws its content through"
 enabled_by_default = true
-# What a portal shows is an inline view of the frame (helio_core::view): the
-# openings travel as a frame payload, every drawer draws through them with
-# its own program, and the plugin reads no other kind's rows.
-provides = []
+# What a portal shows is drawn into the frame's own G-buffer as more
+# occurrences of each drawer's content, through the chains the plugin
+# publishes (helio-portal-api); other kinds read portal concepts from that
+# api crate only.
+provides = [
+    { id = "pulsar.portals.api", kind = "api", members = ["helio-portal-api"], version = 1 },
+]
 requires = []
 
 # The plugin's root crate (the package in this directory): the one place it

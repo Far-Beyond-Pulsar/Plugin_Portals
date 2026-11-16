@@ -1,13 +1,13 @@
-//! The views drawer's and the editor overlay's shaders validate with the
+//! The aperture mask's and the editor overlay's shaders validate with the
 //! portals' row (`helio_pass_portal_cull::PORTAL_VIEW_SNIPPET`), as their
 //! passes compile them.
 
 #[test]
-fn the_views_and_overlay_shaders_validate_with_the_portal_row() {
+fn the_mask_and_overlay_shaders_validate_with_the_portal_row() {
     for (name, text) in [
         (
-            "portal_views.wgsl",
-            include_str!("../shaders/portal_views.wgsl"),
+            "portal_mask.wgsl",
+            include_str!("../shaders/portal_mask.wgsl"),
         ),
         (
             "portal_editor_overlay.wgsl",

@@ -21,10 +21,11 @@ const PLUGIN: &str = "pulsar.portals";
 /// it builds (the end of the type's name), in default graph order.
 const NODES: &[(&str, &str, &str)] = &[
     (
-        "helio.pass.portal_views",
+        "helio.pass.portal_chains",
         "helio.portals",
-        "PortalViewsPass",
+        "PortalChainsPass",
     ),
+    ("helio.pass.portal_mask", "helio.portals", "PortalMaskPass"),
     (
         "helio.pass.portal_editor_overlay",
         "helio.portals",

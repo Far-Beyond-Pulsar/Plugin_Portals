@@ -26,8 +26,9 @@ pub(crate) fn build(p: &mut pulsar_plugins::PluginBuilder) {
 
     // ── Rendering ───────────────────────────────────────────────────────────
 
-    // Portal culling and the portal draws (a G-buffer drawer, the mask and
-    // the editor overlay), configured from the project's portal settings.
+    // The portals' passes (the chains every drawer draws through, the
+    // aperture mask, the editor overlay), configured from the project's
+    // portal settings.
     p.add(RenderFeatureRegistration {
         origin: p.origin(),
         features: portals_component::render_features,
@@ -49,7 +50,8 @@ mod tests {
     fn registers_its_features_settings_and_space_producer() {
         let features =
             engine_backend::subsystems::render::helio_renderer::render_features::plugin_features();
-        for id in ["helio.portal_cull", "helio.portals"] {
+        // The chains, the mask and the overlay (the cull crate holds no pass).
+        for id in ["helio.portals"] {
             assert!(
                 features.ids().contains(&id),
                 "{id}: features {:?}",

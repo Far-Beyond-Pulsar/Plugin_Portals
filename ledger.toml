@@ -19,26 +19,25 @@ test = "plugins/installed/tests/render_acceptance.rs (linked_portals_show_the_fa
 status = "verified"
 
 # ── Render pass crates ──────────────────────────────────────────
-# No GPU buffer keys: the openings are a frame payload (PORTAL_OPENINGS), and
-# what a portal shows is an inline view of the frame (helio_core::view).
+# No GPU buffer keys: the chains are a frame payload (PORTAL_CHAIN_SET), and
+# the chains pass uploads its own rows (helio_portal_api).
 
 [[pass]]
 crate = "helio-pass-portal-cull"
 in_default_graph = false
 reads = []
-owner = "pulsar.portals (contracts: the openings payload, the CPU projection)"
-disposition = "keep: holds no pass since p25; the openings and their view maps the views drawer reads (Helio#390)"
-target_contract = "p25; plugin-migration.md (As built, p25)"
-test = "plugins/vendor/portals/tests/projection.rs (a_pair_publishes_an_opening_each_way_and_takes_no_table_slot)"
+owner = "pulsar.portals (the CPU projection of authored portals, the chains it publishes, the settings)"
+disposition = "keep: holds no pass; publishes every opening and route to the configured depth (PORTAL_CHAIN_SET, p25b, Helio#390)"
+target_contract = "p25b; plugin-migration.md (As built, p25b)"
+test = "plugins/vendor/portals/tests/projection.rs (a_pair_publishes_its_chains_and_takes_no_table_slot)"
 status = "verified"
 
 [[pass]]
 crate = "helio-pass-portal-instances"
 in_default_graph = false
 reads = []
-owner = "pulsar.portals (PortalViewsPass: each opening as an inline view of the frame)"
-disposition = "keep: the views drawer, last in the G-buffer phase; every drawer draws what a portal shows with its own program (Helio#390)"
-target_contract = "p25; plugin-migration.md (As built, p25)"
+owner = "pulsar.portals (PortalChainsPass, PortalMaskPass: the live chains every drawer draws through, the aperture mask)"
+disposition = "keep: the chains (scene prep) and the mask (G-buffer order 60); every drawer emits its own occurrences through the chains (Helio#390)"
+target_contract = "p25b; plugin-migration.md (As built, p25b)"
 test = "plugins/installed/tests/render_acceptance.rs (linked_portals_show_the_far_side_in_the_frame, a_portal_shows_the_decals_of_the_far_side)"
 status = "verified"
-

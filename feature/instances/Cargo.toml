@@ -2,7 +2,7 @@
 name = "helio-pass-portal-instances"
 version = "0.1.0"
 edition = "2021"
-description = "What each portal shows: an inline view of the frame through its opening, drawn by every G-buffer drawer (recursive), and the editor overlay on the openings"
+description = "The portals' passes: the chains every drawer draws its content through, the aperture mask, and the editor overlay on the openings"
 
 [features]
 default = ["gpu"]
@@ -13,6 +13,7 @@ helio-frame-api = { workspace = true }
 helio-feature-api = { workspace = true }
 helio-core = { workspace = true }
 helio-pass-portal-cull = { workspace = true }
+helio-portal-api = { workspace = true }
 wgpu = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }
 glam = { workspace = true }

@@ -2,23 +2,44 @@
 //! describes the renderer's): engines build their settings UI and read the
 //! values back through it.
 
-use helio_settings::{toggle, Group, Resolved};
+use helio_settings::{integer, toggle, Group, Resolved};
 
 use crate::PortalSettings;
 
-/// Whether the portal passes build: a host lists it with its other settings
-/// groups.
+/// The portals' quality: whether their passes build, and how deep and how
+/// many routes through them a frame draws. A host lists it with its other
+/// settings groups.
 pub static PORTALS: Group = Group {
     key: "portals",
     title: "Portals",
     description: "Openings that show another place",
-    settings: &[toggle(
-        "enabled",
-        "Portals",
-        "Portals",
-        true,
-        "Portal passes (about 10 MB of GPU memory)",
-    )],
+    settings: &[
+        toggle(
+            "enabled",
+            "Portals",
+            "Portals",
+            true,
+            "Portal passes: what an opening shows is drawn through it",
+        ),
+        integer(
+            "max_chain_depth",
+            "Recursion Depth",
+            "Portals",
+            (1, 8),
+            3,
+            "How many openings deep a portal seen through portals is drawn: each level draws \
+             the content again through every route of that length",
+        ),
+        integer(
+            "max_chains",
+            "Routes per Frame",
+            "Portals",
+            (1, helio_portal_api::MAX_CHAINS as i64),
+            300,
+            "The most routes through openings a frame draws, shallowest first (six portals \
+             three deep make 258)",
+        ),
+    ],
 };
 
 impl PortalSettings {
@@ -27,6 +48,22 @@ impl PortalSettings {
         debug_assert!(std::ptr::eq(settings.group(), &PORTALS));
         Self {
             enabled: settings.bool("enabled"),
+            max_chain_depth: settings.number("max_chain_depth") as usize,
+            max_chains: settings.number("max_chains") as usize,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_defaults_are_the_default_settings() {
+        let resolved = PortalSettings::from_settings(&PORTALS.defaults());
+        let default = PortalSettings::default();
+        assert_eq!(resolved.enabled, default.enabled);
+        assert_eq!(resolved.max_chain_depth, default.max_chain_depth);
+        assert_eq!(resolved.max_chains, default.max_chains);
     }
 }
