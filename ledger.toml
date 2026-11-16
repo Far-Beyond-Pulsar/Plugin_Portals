@@ -18,56 +18,27 @@ target_contract = "Phase B; plugin-migration.md"
 test = "plugins/installed/tests/render_acceptance.rs (linked_portals_show_the_far_side_in_the_frame)"
 status = "verified"
 
-# ── GPU buffer keys ─────────────────────────────────────────────
-
-[[buffer]]
-key = "portal_views"
-producers = []
-consumers = ["helio-pass-portal-cull", "helio-pass-portal-instances"]
-owner = "portal-cull pass type; written by Helio's PortalProjectionBridge at dense reserved entity slots (Helio examples); no engine writer"
-disposition = "unfinished (Phase 4; tracked in #1055): PortalComponent has no peer link and the editor world cannot provide dense projection slots"
-target_contract = "Phase 4; 03-gpu-reflection-and-rendering.md"
-test = "tracked in #1055"
-status = "unfinished"
-
 # ── Render pass crates ──────────────────────────────────────────
+# No GPU buffer keys: the openings are a frame payload (PORTAL_OPENINGS), and
+# what a portal shows is an inline view of the frame (helio_core::view).
 
 [[pass]]
 crate = "helio-pass-portal-cull"
 in_default_graph = false
-reads = ["PortalChainComponent::portals", "PortalChainComponent::portals::handles", "portal_views", "view_remaps"]
-owner = "helio-presets (mapping); helio-pass-portal-cull (algorithm)"
-disposition = "runs in the editor graph, but nothing authored feeds it: portals (Phase 4)"
-target_contract = "Phase 6; 03-gpu-reflection-and-rendering.md"
-test = "tracked in #1055; plugins/installed/tests/render_acceptance.rs (every_pass_of_the_editor_graph_runs)"
-status = "unfinished"
+reads = []
+owner = "pulsar.portals (contracts: the openings payload, the CPU projection)"
+disposition = "keep: holds no pass since p25; the openings and their view maps the views drawer reads (Helio#390)"
+target_contract = "p25; plugin-migration.md (As built, p25)"
+test = "plugins/vendor/portals/tests/projection.rs (a_pair_publishes_an_opening_each_way_and_takes_no_table_slot)"
+status = "verified"
 
 [[pass]]
 crate = "helio-pass-portal-instances"
 in_default_graph = false
-reads = ["builtin_mesh_index", "builtin_mesh_vertex", "materials", "portal_views", "skeletal_bone_palette", "skeletal_skin_vertices"]
-owner = "helio-presets (mapping); helio-pass-portal-instances (algorithm)"
-disposition = "runs in the editor graph, but nothing authored feeds it: portals (Phase 4)"
-target_contract = "Phase 6; 03-gpu-reflection-and-rendering.md"
-test = "tracked in #1055; plugins/installed/tests/render_acceptance.rs (every_pass_of_the_editor_graph_runs)"
-status = "unfinished"
-
-[[buffer]]
-key = "PortalChainComponent::portals"
-producers = []
-consumers = ["helio-pass-portal-cull"]
-owner = "portals plugin (PortalChainComponent var-len column; contract PORTAL_CHAIN_PORTALS)"
-disposition = "keep: each chain's portal ids, read through the portals' contract const since p22 (was a string key the scan did not see)"
-target_contract = "Phase 3; .agents/PLUGIN_API_REFACTOR_PLAN.md section 14"
-test = "plugins/installed/tests/render_acceptance.rs (linked_portals_show_the_far_side_in_the_frame)"
+reads = []
+owner = "pulsar.portals (PortalViewsPass: each opening as an inline view of the frame)"
+disposition = "keep: the views drawer, last in the G-buffer phase; every drawer draws what a portal shows with its own program (Helio#390)"
+target_contract = "p25; plugin-migration.md (As built, p25)"
+test = "plugins/installed/tests/render_acceptance.rs (linked_portals_show_the_far_side_in_the_frame, a_portal_shows_the_decals_of_the_far_side)"
 status = "verified"
 
-[[buffer]]
-key = "PortalChainComponent::portals::handles"
-producers = []
-consumers = ["helio-pass-portal-cull"]
-owner = "portals plugin (PortalChainComponent var-len handles; contract PORTAL_CHAIN_HANDLES)"
-disposition = "keep: each chain's offset and count into its portal ids, read through the portals' contract const since p22"
-target_contract = "Phase 3; .agents/PLUGIN_API_REFACTOR_PLAN.md section 14"
-test = "plugins/installed/tests/render_acceptance.rs (linked_portals_show_the_far_side_in_the_frame)"
-status = "verified"

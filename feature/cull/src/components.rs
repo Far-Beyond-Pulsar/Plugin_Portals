@@ -40,11 +40,6 @@ pub struct PortalRow {
 // pattern valid. Lets an engine's SceneDB component embed it.
 unsafe impl pulsar_scenedb::Pod for PortalRow {}
 
-/// The buffer the renderer reads [`PortalRow`]s from. Engines produce it
-/// (a SceneDB component stored under this key, or a scene derivation).
-pub const PORTALS: helio_core::BufferContract<PortalRow> =
-    helio_core::BufferContract::new("portals");
-
 impl PortalRow {
     /// Bit in [`Self::flags`] that enables this authored portal.
     pub const FLAG_ENABLED: u32 = 1 << 0;
@@ -94,11 +89,6 @@ pub struct PortalViewRow {
 // pattern valid. Lets an engine's SceneDB component embed it.
 unsafe impl pulsar_scenedb::Pod for PortalViewRow {}
 
-/// The buffer the renderer reads [`PortalViewRow`]s from. Engines produce it
-/// (a SceneDB component stored under this key, or a scene derivation).
-pub const PORTAL_VIEWS: helio_core::BufferContract<PortalViewRow> =
-    helio_core::BufferContract::new("portal_views");
-
 impl PortalViewRow {
     /// The row is a nested projection-only portal surface, not a physical
     /// opening that should contribute to the screen-space portal mask.
@@ -125,11 +115,6 @@ pub struct PortalProjectionCountsRow {
 // pattern valid. Lets an engine's SceneDB component embed it.
 unsafe impl pulsar_scenedb::Pod for PortalProjectionCountsRow {}
 
-/// The buffer the renderer reads [`PortalProjectionCountsRow`]s from. Engines produce it
-/// (a SceneDB component stored under this key, or a scene derivation).
-pub const PORTAL_PROJECTION_COUNTS: helio_core::BufferContract<PortalProjectionCountsRow> =
-    helio_core::BufferContract::new("portal_projection_counts");
-
 impl From<crate::GpuPortalView> for PortalViewRow {
     fn from(v: crate::GpuPortalView) -> Self {
         bytemuck::cast(v)
@@ -143,7 +128,6 @@ impl From<PortalViewRow> for crate::GpuPortalView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytemuck::Zeroable;
     #[test]
     fn scene_records_preserve_gpu_abi() {
         assert_eq!(std::mem::size_of::<PortalRow>(), 88);

@@ -4,18 +4,13 @@
 # (`pulsar_plugins::installed!`).
 id = "pulsar.portals"
 name = "Portals"
-description = "Openings that show another place: their component, pairing and projection, settings and the renderer features that cull and draw through them"
+description = "Openings that show another place: their component, pairing and projection, settings, and the renderer feature that draws what each opening shows as an inline view of the frame"
 enabled_by_default = true
-provides = [
-  { id = "pulsar.portals.rows", kind = "buffer", members = ["portals", "portal_views", "portal_projection_counts", "PortalChainComponent::portals", "PortalChainComponent::portals::handles"] },
-]
-# Optional: without the meshes and materials the draw-through runs on the frame's stand-ins.
-requires = [
-  { id = "pulsar.meshes.rows", optional = true },
-  { id = "pulsar.meshes.api", optional = true },
-  { id = "pulsar.materials.table", optional = true },
-  { id = "pulsar.materials.api", optional = true },
-]
+# What a portal shows is an inline view of the frame (helio_core::view): the
+# openings travel as a frame payload, every drawer draws through them with
+# its own program, and the plugin reads no other kind's rows.
+provides = []
+requires = []
 
 # The plugin's root crate (the package in this directory): the one place it
 # registers everything it contributes. A game links it without its `editor`

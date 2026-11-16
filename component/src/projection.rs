@@ -10,13 +10,15 @@
 //! 2. Each portal's pose is its object's world pose (rotation and translation;
 //!    scale sizes the opening), relative to the frame's world origin like every
 //!    other row the renderer reads.
-//! 3. The feature's `SubLevelResolver` + `PortalProjectionBridge` expand the
-//!    pairs into views and recursion chains, taking their coordinate-space
-//!    slots from the host's one table (`engine_backend::scene::SpaceTable`),
-//!    so they cannot collide with rigid frames.
-//! 4. The rows go to the [`PortalProjectionInput`] a scene derivation uploads,
-//!    and the live counts to the passes, as the frame's
-//!    `helio_pass_portal_cull::PORTAL_COUNTS` payload.
+//! 3. The feature's `SubLevelResolver` + `PortalProjectionBridge` turn the
+//!    pairs into the frame's openings, each with the view map that places
+//!    what it shows beyond it.
+//! 4. The openings go to the portals' drawer as the frame's
+//!    `helio_pass_portal_cull::PORTAL_OPENINGS` payload. The drawer renders
+//!    each visible one as an inline view of the frame (`helio_core::view`),
+//!    recursing through portals seen through portals, so only the direct
+//!    openings are published: no recursion chains, no coordinate-space slots
+//!    in the frame's table, nothing uploaded.
 //!
 //! [`PortalSync`] does it for one renderer: the engine makes one per renderer
 //! (a registered space producer, `engine_backend::scene::SpaceProducer`).
@@ -31,10 +33,8 @@ use std::sync::Arc;
 use engine_backend::scene::{SpaceProducer, SpaceTable};
 use glam::{DMat4, DQuat, DVec3, Mat4};
 use helio_pass_portal_cull::components::PortalRow;
-use helio_pass_portal_cull::scene_rows::{PortalProjection, PortalProjectionInput};
-use helio_pass_portal_cull::{PORTAL_COUNTS, PortalCounts};
 use helio_pass_portal_cull::{
-    PortalProjectionBridge, PortalProjectionConfig, SubLevelContents, SubLevelResolver,
+    PORTAL_OPENINGS, PortalOpenings, PortalProjectionBridge, SubLevelContents, SubLevelResolver,
 };
 use pulsar_scene_model::Visibility;
 use pulsar_scene_model::attachments::enabled_components;
@@ -42,10 +42,6 @@ use pulsar_scene_model::hierarchy_transform::world_matrix_of;
 use pulsar_scenedb::{Entity, World};
 
 use crate::PortalComponent as AuthoredPortal;
-
-/// Chains the projection may produce (a pair of facing portals recurses; this
-/// bounds a scene with many).
-const MAX_CHAINS: usize = 256;
 
 /// One enabled, visible authored portal.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -177,53 +173,29 @@ pub fn build_resolver(world: &World, pairing: &Pairing, origin: DVec3) -> SubLev
     resolver
 }
 
-/// Builds the portal rows each frame and feeds them to the portal passes.
+/// Builds the frame's openings each frame and publishes them to the
+/// portals' drawer.
 pub struct PortalSync {
-    input: PortalProjectionInput,
+    /// Direct openings only: recursion is the drawer's, per view.
     bridge: PortalProjectionBridge,
     /// Problems already reported, so a standing problem is logged once.
     reported: HashSet<PortalProblem>,
-    counts: Arc<PortalCounts>,
-    /// The camera the chains are pruned against: `(view-projection, position)`,
-    /// relative to the frame's origin. Without one every path is built.
-    view: Option<(Mat4, glam::Vec3)>,
+    openings: Arc<PortalOpenings>,
 }
 
 impl Default for PortalSync {
     fn default() -> Self {
         Self {
-            input: PortalProjectionInput::default(),
-            bridge: PortalProjectionBridge::with_config(PortalProjectionConfig {
-                max_chains: Some(MAX_CHAINS),
-                ..PortalProjectionConfig::default()
-            })
-            .expect("a nonzero chain depth"),
+            bridge: PortalProjectionBridge::new(1).expect("a nonzero chain depth"),
             reported: HashSet::new(),
-            counts: Arc::new(PortalCounts::default()),
-            view: None,
+            openings: Arc::new(PortalOpenings::default()),
         }
     }
 }
 
 impl PortalSync {
-    /// The camera to prune chains against (see `view`).
-    pub fn set_view(&mut self, view: Option<(Mat4, glam::Vec3)>) {
-        self.view = view;
-    }
-
-    /// The rows the portal derivation uploads (clone it into the derivation).
-    pub fn input(&self) -> PortalProjectionInput {
-        self.input.clone()
-    }
-
-    /// Rebuild the portals of `world` (relative to `origin`), taking the spaces
-    /// they need from `table`. Returns the live counts.
-    pub fn rebuild(
-        &mut self,
-        world: &World,
-        origin: DVec3,
-        table: &mut SpaceTable,
-    ) -> PortalCounts {
+    /// Rebuild the openings of `world` (relative to `origin`).
+    pub fn rebuild(&mut self, world: &World, origin: DVec3) -> PortalOpenings {
         let pairing = pair_portals(world);
         let current: HashSet<PortalProblem> = pairing.problems.iter().copied().collect();
         for problem in &current {
@@ -232,64 +204,44 @@ impl PortalSync {
             }
         }
         self.reported.retain(|problem| current.contains(problem));
-
         if pairing.pairs.is_empty() {
-            self.input.clear();
-            PortalCounts::default()
-        } else {
-            let resolver = build_resolver(world, &pairing, origin);
-            // Only the portals the camera can see get chains: every chain redraws the
-            // scene it shows, so building the paths nobody sees is pure waste.
-            let built = match self.view {
-                Some((view_projection, position)) => self.bridge.build_visible_from_camera_into(
-                    &resolver,
-                    view_projection,
-                    position,
-                    table,
-                ),
-                None => self.bridge.build_into(&resolver, table),
-            };
-            match built {
-                Ok(frame) => {
-                    self.input.set(&frame, table.matrices());
-                    PortalCounts {
-                        views: frame.counts.portal_view_count,
-                        chains: frame.counts.portal_chain_count,
-                    }
-                }
-                Err(error) => {
-                    tracing::warn!("portals not drawn: {error}");
-                    self.input.clear();
-                    PortalCounts::default()
-                }
+            return PortalOpenings::default();
+        }
+        let resolver = build_resolver(world, &pairing, origin);
+        match self.bridge.build(&resolver) {
+            Ok(frame) => PortalOpenings::from_frame(&frame),
+            Err(error) => {
+                tracing::warn!("portals not drawn: {error}");
+                PortalOpenings::default()
             }
         }
+    }
+
+    /// The openings last published.
+    pub fn openings(&self) -> &Arc<PortalOpenings> {
+        &self.openings
     }
 }
 
 impl SpaceProducer for PortalSync {
-    fn set_view(&mut self, view_projection: Mat4, position: glam::Vec3) {
-        self.view = Some((view_projection, position));
-    }
-
     fn apply(
         &mut self,
         world: &World,
         origin: DVec3,
-        table: &mut SpaceTable,
+        _table: &mut SpaceTable,
         payloads: &mut helio_core::ScenePayloads,
     ) {
-        let counts = self.rebuild(world, origin, table);
-        if *self.counts != counts {
-            self.counts = Arc::new(counts);
+        let openings = self.rebuild(world, origin);
+        if *self.openings != openings {
+            self.openings = Arc::new(openings);
         }
-        payloads.insert(&PORTAL_COUNTS, self.counts.clone());
+        payloads.insert(&PORTAL_OPENINGS, self.openings.clone());
     }
 
     fn derivation(
         &self,
-        device: &wgpu::Device,
+        _device: &wgpu::Device,
     ) -> Option<Box<dyn helio_scene_join::SceneDerivation>> {
-        Some(Box::new(PortalProjection::new(device, self.input())))
+        None
     }
 }

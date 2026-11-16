@@ -1,50 +1,31 @@
-//! GPU-facing per-portal render data.
+//! What the portals' drawer reads each frame: the openings and where each
+//! looks.
 //!
-//! Authored as SceneDB rows and mirrored into the `portal_views` and
-//! SceneDB variable-length portal-chain buffers. Consumed by
-//! `helio-pass-portal-cull` (frustum test
-//! to select which instances get a duplicate draw) and
-//! `helio-pass-portal-instances` (the duplicate draw itself, clipped to the
-//! portal's opening).
+//! A host projects its authored portals (`PortalProjectionBridge`) and
+//! publishes the frame's direct openings as [`PORTAL_OPENINGS`]. The portals'
+//! views drawer (`helio_pass_portal_instances::PortalViewsPass`) renders each
+//! visible opening as an inline view of the frame (`helio_core::view`): the
+//! frame's camera seen through the opening's view map, drawn by every drawer
+//! of the G-buffer phase into the opening. Recursion (a portal seen through a
+//! portal) is the drawer running again inside that view, so the host
+//! publishes only the direct openings.
+
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
+use glam::{Mat4, Vec3, Vec4};
+
+use crate::PortalProjectionFrame;
 
 /// [`GpuPortalView`] in WGSL (`//!use portal_view`): `struct GpuPortalView`,
-/// field for field (144 bytes). Read by the cull (`portal_cull.wgsl`) and
-/// by `helio-pass-portal-instances`' duplicate draw (`gbuffer_portal.wgsl`),
-/// opening mask (`portal_mask.wgsl`) and editor overlay
+/// field for field (144 bytes). Read by the views drawer's stamp
+/// (`portal_stamp.wgsl`) and the editor overlay
 /// (`portal_editor_overlay.wgsl`); each declares only its own binding of
 /// the rows.
 pub const PORTAL_VIEW_SNIPPET: helio_core::shader::ShaderSnippet =
     helio_core::wgsl_snippet!("//!use portal_view", "../shaders/portal_view.wgsl");
 
-/// Legacy dense-row reserve used by existing demo setup code. It is not a
-/// projection or recursion cap: the resolver/bridge accept runtime-sized
-/// chain vectors, SceneDB grows the handle/payload buffers, and callers that
-/// need more rows must reserve a larger runtime entity range.
-///
-/// It is retained only so older demos can reserve a conservative dense row
-/// range without changing their setup code. The GPU cull output is governed
-/// by its own runtime work/capacity policy and does not use this symbol.
-pub const MAX_PORTAL_CHAINS: usize = 300;
-
-/// The explicit `#[gpu(buffer = ...)]` pool key for portal-chain IDs.
-pub const PORTAL_CHAIN_PORTAL_POOL_BUFFER: &str = "PortalChainComponent::portals";
-
-/// SceneDB's generated per-row handle-table key for [`PORTAL_CHAIN_PORTAL_POOL_BUFFER`].
-pub const PORTAL_CHAIN_HANDLE_BUFFER: &str = "PortalChainComponent::portals::handles";
-
-/// [`PORTAL_CHAIN_HANDLE_BUFFER`] as a contract: one `VarLenHandle`
-/// (`offset`, `count`; two `u32`s) per chain row.
-pub const PORTAL_CHAIN_HANDLES: helio_core::BufferContract<[u32; 2]> =
-    helio_core::BufferContract::new(PORTAL_CHAIN_HANDLE_BUFFER);
-
-/// [`PORTAL_CHAIN_PORTAL_POOL_BUFFER`] as a contract: the chains' portal ids,
-/// one `u32` each, addressed by [`PORTAL_CHAIN_HANDLES`].
-pub const PORTAL_CHAIN_PORTALS: helio_core::BufferContract<u32> =
-    helio_core::BufferContract::new(PORTAL_CHAIN_PORTAL_POOL_BUFFER);
-
-/// One active portal's render data. 144 bytes.
+/// One opening as the GPU reads it. 144 bytes.
 ///
 /// # WGSL equivalent
 /// ```wgsl
@@ -57,54 +38,163 @@ pub const PORTAL_CHAIN_PORTALS: helio_core::BufferContract<u32> =
 /// }
 /// ```
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub struct GpuPortalView {
-    /// Portal-local → world (this portal surface's own pose, `pair.a.transform`).
-    /// Used by `helio-pass-portal-mask` to place the opening quad it stamps
-    /// into the screen-space visibility mask — see that crate's docs.
+    /// Portal-local -> frame space: the opening's own pose. The opening is
+    /// local X/Y within `half_extent`; what it shows lies on its local +Z
+    /// side.
     pub transform: [f32; 16],
-
-    /// World → portal-local (this portal surface's own inverse transform).
-    /// Used by the fragment-shader clip test: a duplicated fragment is kept
-    /// only when its world position maps within `half_extent` of local X/Y
-    /// and beyond the source surface on the target side (local Z >= 0).
+    /// Frame space -> portal-local.
     pub inverse_transform: [f32; 16],
-
-    /// Half-extent of the portal opening, in its own local X/Y.
+    /// Half-extent of the opening, in its own local X/Y.
     pub half_extent: [f32; 2],
-
-    /// Index into `coordinate_spaces[]` (see `crate::coordinate_space`) —
-    /// holds the portal-view transform that places target-level content
-    /// beyond the source surface where it should appear when seen through
-    /// this side. This is distinct from the teleport/pair map.
+    /// Unused by the views drawer (the view map travels with the opening);
+    /// kept for the row's layout.
     pub coordinate_space: u32,
-
+    /// [`crate::PortalViewRow::FLAG_MASK_HIDDEN`] for a row that is no
+    /// physical opening.
     pub _pad: u32,
 }
 
-// A chain row is SceneDB's variable-length `Vec<u32>` field, not a fixed Rust
-// struct. The GPU ABI is the pair of buffers named above: a
-// `VarLenHandle { offset, count }` per row and a contiguous `u32` payload.
-
-/// The live view and chain counts of the frame's portal projection: how
-/// many leading rows of `portal_views` and of the chain tables are this
-/// frame's (the SceneDB-backed buffers are capacity-sized). The host that
-/// projects the portals publishes it every frame under [`PORTAL_COUNTS`];
-/// without it the portal passes draw nothing.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PortalCounts {
-    pub views: u32,
-    pub chains: u32,
+/// One opening of the frame: where it is and what it shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PortalOpening {
+    /// Stable while the opening exists (its source and target occurrences):
+    /// the frame retains the opening's view, and its history, under it.
+    pub key: u64,
+    /// The opening's row (pose, extent).
+    pub view: GpuPortalView,
+    /// The opening's view map (`crate::portal_view_map`): from the space it
+    /// shows to the space it is in. The opening's view is the camera seen
+    /// through it (`GpuCameraUniforms::through`).
+    pub content_to_drawn: Mat4,
 }
 
-/// The payload the portal passes read their live counts from.
-pub const PORTAL_COUNTS: helio_core::PayloadContract<PortalCounts> =
-    helio_core::PayloadContract::new("portal_counts");
+impl PortalOpening {
+    /// The opening's pose.
+    pub fn transform(&self) -> Mat4 {
+        Mat4::from_cols_array(&self.view.transform)
+    }
 
-/// The counts published in `scene` this frame (zero without a projection).
-pub fn portal_counts(scene: &helio_core::SceneBufferProjection) -> PortalCounts {
+    /// The plane of the opening in the space it shows, as a view's clip
+    /// plane (`GpuCameraUniforms::clip_plane`): what lies between the
+    /// opening's far side and the view's eye is not drawn.
+    pub fn clip_plane(&self) -> Vec4 {
+        let pose = self.transform();
+        let normal = pose.z_axis.truncate().normalize_or_zero();
+        let plane = normal.extend(-normal.dot(pose.w_axis.truncate()));
+        // A plane maps by the transpose of the point map.
+        self.content_to_drawn.transpose() * plane
+    }
+
+    /// Whether `eye` (frame space) sees the opening from its front (it shows
+    /// its far side to eyes on its local -Z side).
+    pub fn faces(&self, eye: Vec3) -> bool {
+        let local = Mat4::from_cols_array(&self.view.inverse_transform).transform_point3(eye);
+        local.z < 0.0
+    }
+
+    /// The opening's corners in frame space.
+    pub fn corners(&self) -> [Vec3; 4] {
+        let pose = self.transform();
+        let [hx, hy] = self.view.half_extent;
+        [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+            .map(|(x, y)| pose.transform_point3(Vec3::new(x * hx, y * hy, 0.0)))
+    }
+}
+
+/// The frame's direct openings ([`PORTAL_OPENINGS`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PortalOpenings(pub Vec<PortalOpening>);
+
+impl PortalOpenings {
+    /// The direct openings of a projected frame: every physical view row
+    /// (not a nested one), with its view map from the frame's own
+    /// coordinate-space table (`PortalProjectionBridge::build`).
+    pub fn from_frame(frame: &PortalProjectionFrame) -> Self {
+        let mut keys = vec![0u64; frame.portal_views.len()];
+        for (key, &index) in &frame.projection_indices {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            key.hash(&mut hasher);
+            if let Some(slot) = keys.get_mut(index as usize) {
+                *slot = hasher.finish();
+            }
+        }
+        Self(
+            frame
+                .portal_views
+                .iter()
+                .zip(keys)
+                .filter(|(row, _)| row._pad & crate::PortalViewRow::FLAG_MASK_HIDDEN == 0)
+                .map(|(row, key)| PortalOpening {
+                    key,
+                    view: GpuPortalView::from(*row),
+                    content_to_drawn: frame
+                        .coordinate_spaces
+                        .get(row.coordinate_space as usize)
+                        .copied()
+                        .unwrap_or(Mat4::IDENTITY),
+                })
+                .collect(),
+        )
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// The frame's openings, published by the host that projects its portals
+/// every frame. Without it nothing is drawn through a portal.
+pub const PORTAL_OPENINGS: helio_core::PayloadContract<PortalOpenings> =
+    helio_core::PayloadContract::new("portal_openings");
+
+/// The openings published in `scene` this frame.
+pub fn portal_openings(scene: &helio_core::SceneBufferProjection) -> Option<Arc<PortalOpenings>> {
     scene
-        .payload(&PORTAL_COUNTS)
-        .map(|counts| *counts)
-        .unwrap_or_default()
+        .payload(&PORTAL_OPENINGS)
+        .filter(|openings| !openings.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opening(content_to_drawn: Mat4) -> PortalOpening {
+        let pose = Mat4::from_translation(Vec3::new(0.0, 1.0, -5.0));
+        PortalOpening {
+            key: 1,
+            view: GpuPortalView {
+                transform: pose.to_cols_array(),
+                inverse_transform: pose.inverse().to_cols_array(),
+                half_extent: [1.0, 1.0],
+                coordinate_space: 0,
+                _pad: 0,
+            },
+            content_to_drawn,
+        }
+    }
+
+    #[test]
+    fn the_clip_plane_keeps_what_lies_beyond_the_destination() {
+        // The opening at z = -5 shows +Z of itself; its content sits 100 m
+        // further along +X.
+        let map = Mat4::from_translation(Vec3::new(-100.0, 0.0, 0.0));
+        let plane = opening(map).clip_plane();
+        let side = |p: Vec3| plane.truncate().dot(p) + plane.w;
+        // Content beyond the destination (drawn beyond the opening) is kept,
+        // content on the eye's side of it is clipped.
+        assert!(side(Vec3::new(100.0, 1.0, -2.0)) > 0.0);
+        assert!(side(Vec3::new(100.0, 1.0, -8.0)) < 0.0);
+        // Through the map, kept content lands beyond the opening.
+        assert!(map.transform_point3(Vec3::new(100.0, 1.0, -2.0)).z > -5.0);
+    }
+
+    #[test]
+    fn an_opening_faces_eyes_on_its_near_side() {
+        let opening = opening(Mat4::IDENTITY);
+        assert!(opening.faces(Vec3::new(0.0, 1.0, -10.0)));
+        assert!(!opening.faces(Vec3::ZERO));
+    }
 }
