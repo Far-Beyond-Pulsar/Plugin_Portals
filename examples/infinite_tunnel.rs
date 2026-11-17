@@ -35,10 +35,7 @@ use common::{
     box_mesh, flush_scene_db, make_material, new_scene_db_with_gpu_mirror, point_light,
     scene_db_handle, spawn_light, spawn_material, spawn_mesh, spawn_object,
 };
-use helio::{
-    required_experimental_features, required_wgpu_features, required_wgpu_limits, Camera, Renderer,
-    RendererBuilder, RendererConfig,
-};
+use helio::{Camera, Renderer, RendererBuilder, RendererConfig};
 use helio_pass_portal_cull::{PortalProjectionBridge, SubLevelContents, SubLevelResolver};
 use pulsar_scenedb::{Entity, SceneDb};
 
@@ -81,9 +78,6 @@ const HIDE_OFFSET: f32 = 500.0;
 /// Far plane — kept beyond the last continuation copy so the tunnel never
 /// visibly ends.
 const FAR_PLANE: f32 = 200.0;
-
-/// First group index reserved for the copy sublevels.
-const COPY_GROUP_BASE: u8 = 10;
 
 fn main() {
     env_logger::init();
@@ -161,7 +155,7 @@ impl ApplicationHandler for App {
         let queue = graphics.queue.clone();
         let format = graphics.surface_config.format;
 
-        let mut config = RendererConfig::new(size.width, size.height, format);
+        let config = RendererConfig::new(size.width, size.height, format);
         let mut scene_db = new_scene_db_with_gpu_mirror(&device, &queue);
         let mut renderer = RendererBuilder::new(config, scene_db_handle(&scene_db))
             .with_external_device()
@@ -355,7 +349,6 @@ impl ApplicationHandler for App {
             glam::Vec3::new(0.0, 0.0, -1.0),
             glam::Vec3::Y,
         );
-        let half_extent = glam::Vec2::new(HALF_WIDTH, HALF_HEIGHT);
 
         // The near (+Z) portal pulls the +Z-direction copies up into the
         // tunnel that continues past the near end; the far (-Z) portal does
