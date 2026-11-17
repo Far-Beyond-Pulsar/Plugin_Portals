@@ -32,16 +32,16 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use engine_backend::scene::{SpaceProducer, SpaceTable};
-use glam::{DMat4, DQuat, DVec3, Mat4};
+use glam::{DMat4, DQuat, DVec3};
 use helio_pass_portal_cull::components::PortalRow;
 use helio_pass_portal_cull::{
-    PortalProjectionBridge, PortalProjectionConfig, PortalSettings, SubLevelContents,
-    SubLevelResolver, chain_set_with_poses,
+    chain_set_with_poses, PortalProjectionBridge, PortalProjectionConfig, PortalSettings,
+    SubLevelContents, SubLevelResolver,
 };
-use helio_portal_api::{PORTAL_CHAIN_SET, PortalChainSet};
-use pulsar_scene_model::Visibility;
+use helio_portal_api::{PortalChainSet, PORTAL_CHAIN_SET};
 use pulsar_scene_model::attachments::enabled_components;
 use pulsar_scene_model::hierarchy_transform::world_matrix_of;
+use pulsar_scene_model::Visibility;
 use pulsar_scenedb::{Entity, World};
 
 use crate::PortalComponent as AuthoredPortal;

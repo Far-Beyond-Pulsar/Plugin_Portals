@@ -24,7 +24,10 @@
 //!   the depth behind it.
 //! - Each drawer then draws its content through the live chains
 //!   ([`OCCURRENCE_ORDER`]), clipping with [`PORTAL_CHAIN_SNIPPET`] and
-//!   tagging what it draws with the chain's remap.
+//!   tagging what it draws with the chain's remap; a drawer that culls
+//!   against the depth those left draws at [`OCCLUDED_OCCURRENCE_ORDER`].
+//!   [`PORTAL_CHAIN_VOLUMES`] bounds what each chain shows, for drawers
+//!   that look their content up in a tree.
 
 use glam::{DMat4, Vec2};
 
@@ -116,6 +119,29 @@ pub struct GpuPortalStage {
     pub half_extent: [f32; 4],
 }
 
+/// What a chain can show, as half-spaces in its content's own world (the
+/// snippet's `GpuPortalVolume`, 176 bytes): the camera's frustum mapped back
+/// through the chain, the four sides of the pyramid from the camera's place
+/// in the content through the chain's deepest opening, and that opening's
+/// plane. A drawer culls its content per chain against it (bounds in the
+/// content's world); what passes may still be clipped per fragment.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuPortalVolume {
+    /// `xyz` the inward normal, `w` the offset: a point `p` is inside where
+    /// `dot(xyz, p) + w >= 0`.
+    pub planes: [[f32; 4]; PORTAL_VOLUME_PLANES],
+    pub plane_count: u32,
+    pub _pad: [u32; 3],
+}
+
+/// The planes of a [`GpuPortalVolume`].
+pub const PORTAL_VOLUME_PLANES: usize = 10;
+
+/// The live chains' volumes: a storage buffer of [`GpuPortalVolume`], a row
+/// per row of [`PORTAL_CHAINS`].
+pub const PORTAL_CHAIN_VOLUMES: &str = "portal_chain_volumes";
+
 /// The live chains: a storage buffer of [`GpuPortalChain`], published by the
 /// portals' chains pass.
 pub const PORTAL_CHAINS: &str = "portal_chains";
@@ -156,6 +182,11 @@ pub const MASK_ORDER: i32 = 60;
 /// mask, before the screen-space drawers that change what is drawn (decals,
 /// 100), which then change a chain's surfaces too.
 pub const OCCURRENCE_ORDER: i32 = 70;
+/// The G-buffer draw order of occurrences that cull against the depth the
+/// others left (a GPU-driven drawer with its own occlusion pyramid of the
+/// frame's depth, such as virtual geometry): after [`OCCURRENCE_ORDER`], so
+/// what the classic occurrences drew occludes them.
+pub const OCCLUDED_OCCURRENCE_ORDER: i32 = 75;
 
 /// The most chains a frame can draw through: one remap each.
 pub const MAX_CHAINS: u32 = helio_frame_api::lighting::VIEW_REMAP_CHAINS as u32;
@@ -175,12 +206,14 @@ mod tests {
     fn rows_match_their_wgsl() {
         assert_eq!(std::mem::size_of::<GpuPortalChain>(), 160);
         assert_eq!(std::mem::size_of::<GpuPortalStage>(), 96);
+        assert_eq!(std::mem::size_of::<GpuPortalVolume>(), 176);
         let module = naga::front::wgsl::parse_str(PORTAL_CHAIN_SNIPPET.source).expect("parses");
         let mut layouter = naga::proc::Layouter::default();
         layouter.update(module.to_ctx()).expect("lays out");
         for (name, size) in [
             ("GpuPortalChain", std::mem::size_of::<GpuPortalChain>()),
             ("GpuPortalStage", std::mem::size_of::<GpuPortalStage>()),
+            ("GpuPortalVolume", std::mem::size_of::<GpuPortalVolume>()),
         ] {
             let (handle, _) = module
                 .types

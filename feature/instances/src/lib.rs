@@ -130,6 +130,65 @@ fn visible_chains(set: &PortalChainSet, eye: DVec3, view_proj: Mat4, cap: usize)
     live
 }
 
+/// What `chain` can show (`helio_portal_api::GpuPortalVolume`), in its content's
+/// world, composed in f64: the frustum of `view_proj` mapped back through the
+/// chain, the pyramid from the camera's place in the content (`eye`, frame
+/// space) through the chain's deepest opening, and that opening's plane.
+fn chain_volume(
+    set: &PortalChainSet,
+    chain: &LiveChain,
+    eye: DVec3,
+    view_proj: Mat4,
+) -> helio_portal_api::GpuPortalVolume {
+    let mut volume = helio_portal_api::GpuPortalVolume::default();
+    let mut planes: Vec<glam::DVec4> = Vec::with_capacity(helio_portal_api::PORTAL_VOLUME_PLANES);
+    let normalized = |plane: glam::DVec4| {
+        let length = plane.truncate().length();
+        (length > 0.0).then(|| plane / length)
+    };
+    // The frustum's five planes (it has no far one), back into the content.
+    let to_content = chain.content_to_drawn.transpose();
+    for plane in &helio_core::depth::frustum_planes(view_proj.to_cols_array())[..5] {
+        let plane = glam::Vec4::from_array(*plane).as_dvec4();
+        if let Some(plane) = normalized(to_content * plane) {
+            planes.push(plane);
+        }
+    }
+    // The deepest opening, in the content: what lies beyond it, seen from the
+    // camera's place there.
+    let deepest = &set.openings[*chain.openings.last().expect("a route") as usize];
+    let local_to_content = (deepest.transform.inverse() * deepest.content_to_drawn).inverse();
+    let [hx, hy] = deepest.half_extent.as_dvec2().to_array();
+    let corners = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+        .map(|(x, y)| local_to_content.transform_point3(DVec3::new(x * hx, y * hy, 0.0)));
+    let center = local_to_content.transform_point3(DVec3::ZERO);
+    let eye_in_content = chain.content_to_drawn.inverse().transform_point3(eye);
+    let inside = eye_in_content + 2.0 * (center - eye_in_content);
+    for i in 0..4 {
+        let (a, b) = (corners[i], corners[(i + 1) % 4]);
+        let normal = (a - eye_in_content).cross(b - eye_in_content);
+        let normal = if normal.dot(inside - eye_in_content) < 0.0 {
+            -normal
+        } else {
+            normal
+        };
+        if let Some(plane) = normalized(normal.extend(-normal.dot(eye_in_content))) {
+            planes.push(plane);
+        }
+    }
+    let beyond = local_to_content
+        .transform_vector3(DVec3::Z)
+        .normalize_or_zero();
+    if let Some(plane) = normalized(beyond.extend(-beyond.dot(center))) {
+        planes.push(plane);
+    }
+    for (slot, plane) in volume.planes.iter_mut().zip(&planes) {
+        *slot = plane.as_vec4().to_array();
+    }
+    volume.plane_count = planes.len().min(helio_portal_api::PORTAL_VOLUME_PLANES) as u32;
+    volume
+}
+
 fn storage_buffer(device: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
@@ -150,6 +209,8 @@ fn fit(device: &wgpu::Device, buffer: &mut wgpu::Buffer, bytes: u64, label: &str
 pub struct PortalChainsPass {
     chains: wgpu::Buffer,
     stages: wgpu::Buffer,
+    /// [`helio_portal_api::PORTAL_CHAIN_VOLUMES`].
+    volumes: wgpu::Buffer,
     remaps: wgpu::Buffer,
     openings: wgpu::Buffer,
     chain_count: u32,
@@ -169,6 +230,7 @@ impl PortalChainsPass {
         Self {
             chains: storage_buffer(device, "Portal Chains", 160),
             stages: storage_buffer(device, "Portal Stages", 96),
+            volumes: storage_buffer(device, "Portal Chain Volumes", 176),
             remaps: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Portal Remaps"),
                 size: helio_frame_api::lighting::VIEW_REMAPS_BYTES,
@@ -207,6 +269,7 @@ impl RenderPass for PortalChainsPass {
         &[
             PORTAL_CHAINS,
             PORTAL_STAGES,
+            helio_portal_api::PORTAL_CHAIN_VOLUMES,
             helio_frame_api::lighting::VIEW_REMAPS,
         ]
     }
@@ -232,6 +295,10 @@ impl RenderPass for PortalChainsPass {
         let live = visible_chains(&set, eye, view_proj, self.cap);
 
         let mut chains = Vec::with_capacity(live.len());
+        let volumes: Vec<_> = live
+            .iter()
+            .map(|chain| chain_volume(&set, chain, eye, view_proj))
+            .collect();
         let mut stages = Vec::new();
         let mut remaps = Vec::with_capacity(live.len());
         let mut previous = HashMap::with_capacity(live.len());
@@ -329,6 +396,12 @@ impl RenderPass for PortalChainsPass {
         );
         fit(
             ctx.device,
+            &mut self.volumes,
+            (volumes.len() * 176) as u64,
+            "Portal Chain Volumes",
+        );
+        fit(
+            ctx.device,
             &mut self.openings,
             (openings.len() * 144) as u64,
             "Portal Mask Openings",
@@ -336,6 +409,7 @@ impl RenderPass for PortalChainsPass {
         if !chains.is_empty() {
             ctx.write_buffer(&self.chains, 0, bytemuck::cast_slice(&chains));
             ctx.write_buffer(&self.stages, 0, bytemuck::cast_slice(&stages));
+            ctx.write_buffer(&self.volumes, 0, bytemuck::cast_slice(&volumes));
             ctx.write_buffer(&self.remaps, 0, bytemuck::cast_slice(&remaps));
             ctx.write_buffer(&self.openings, 0, bytemuck::cast_slice(&openings));
         }
@@ -368,6 +442,7 @@ impl RenderPass for PortalChainsPass {
         for (name, buffer) in [
             (PORTAL_CHAINS, own(&self.chains)),
             (PORTAL_STAGES, own(&self.stages)),
+            (helio_portal_api::PORTAL_CHAIN_VOLUMES, own(&self.volumes)),
             (helio_frame_api::lighting::VIEW_REMAPS, own(&self.remaps)),
             (MASK_OPENINGS, own(&self.openings)),
         ] {
@@ -732,6 +807,34 @@ mod tests {
         let beside_far = DVec3::new(6.0e6, 1234.5, -3.0e6 - 2.0);
         let drawn = live[0].content_to_drawn.transform_point3(beside_far);
         assert!(drawn.distance(DVec3::new(0.0, 0.0, -2.0)) < 1e-6, "{drawn}");
+    }
+
+    /// A chain's volume holds content beyond its opening, seen through it, and
+    /// not content beside the far portal on the near side, nor behind the
+    /// camera's view.
+    #[test]
+    fn a_chain_volume_holds_what_its_opening_shows() {
+        let set = pair();
+        let eye = Vec3::new(0.0, 0.0, 5.0);
+        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 300);
+        let volume = chain_volume(&set, &live[0], eye.as_dvec3(), camera(eye, Vec3::ZERO));
+        assert_eq!(
+            volume.plane_count as usize,
+            helio_portal_api::PORTAL_VOLUME_PLANES
+        );
+        let holds = |p: DVec3| {
+            volume.planes[..volume.plane_count as usize]
+                .iter()
+                .all(|plane| {
+                    glam::Vec4::from_array(*plane).truncate().dot(p.as_vec3()) + plane[3] >= -1e-4
+                })
+        };
+        // B's far side (what A shows: drawn at z < 0, behind A).
+        assert!(holds(DVec3::new(100.0, 0.0, -2.0)));
+        // On the camera's side of B: drawn in front of A, not through it.
+        assert!(!holds(DVec3::new(100.0, 0.0, 2.0)));
+        // Beyond B but far outside A's opening.
+        assert!(!holds(DVec3::new(100.0, 40.0, -2.0)));
     }
 
     /// A route past the budget is dropped, shallowest kept first.

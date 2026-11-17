@@ -32,7 +32,8 @@ struct GpuPortalChain {
     /// where it is visible.
     opening:               u32,
     /// The chain's remap (`helio_frame_api::lighting::VIEW_REMAPS`): its
-    /// surfaces carry it in their tag (`gbuffer_remap_tag`).
+    /// surfaces carry it in their tag (`gbuffer_remap_tag`). Equal to the
+    /// chain's index in `PORTAL_CHAINS`, so a remap finds its chain.
     remap:                 u32,
     _pad0:                 u32,
     _pad1:                 u32,
@@ -48,6 +49,29 @@ struct GpuPortalStage {
     eye:              vec4<f32>,
     /// The opening's half extent in its local X/Y (xy), zw unused.
     half_extent:      vec4<f32>,
+}
+
+/// What a chain can show, as half-spaces in its content's world
+/// (`helio_portal_api::GpuPortalVolume`, 176 bytes): inside where
+/// `dot(plane.xyz, p) + plane.w >= 0` for every plane.
+struct GpuPortalVolume {
+    planes:      array<vec4<f32>, 10>,
+    plane_count: u32,
+    _pad0:       u32,
+    _pad1:       u32,
+    _pad2:       u32,
+}
+
+/// Whether a sphere (content's world) may show through the chain: not wholly
+/// outside any plane of its volume.
+fn portal_volume_holds_sphere(volume: GpuPortalVolume, center: vec3<f32>, radius: f32) -> bool {
+    for (var i = 0u; i < min(volume.plane_count, 10u); i += 1u) {
+        let plane = volume.planes[i];
+        if dot(plane.xyz, center) + plane.w < -radius {
+            return false;
+        }
+    }
+    return true;
 }
 
 /// The chain's rotation (rigid: normals and tangents turn by it alone).
