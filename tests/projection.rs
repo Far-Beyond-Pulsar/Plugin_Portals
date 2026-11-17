@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use engine_backend::scene::{SpaceProducer, SpaceTable};
 use glam::{DVec3, Mat4};
-use helio_pass_portal_cull::PORTAL_OPENINGS;
+use helio_portal_api::PORTAL_CHAIN_SET;
 use portals_component::{
     PortalComponent as AuthoredPortal, PortalProblem, PortalSync, pair_portals,
 };
@@ -88,7 +88,7 @@ fn a_hidden_or_disabled_portal_leaves_its_partner_alone() {
 }
 
 #[test]
-fn a_pair_publishes_an_opening_each_way_and_takes_no_table_slot() {
+fn a_pair_publishes_its_chains_and_takes_no_table_slot() {
     let mut world = World::new();
     portal_at(&mut world, 3, [0.0, 0.0, 0.0]);
     portal_at(&mut world, 3, [50.0, 0.0, 0.0]);
@@ -96,20 +96,38 @@ fn a_pair_publishes_an_opening_each_way_and_takes_no_table_slot() {
     let mut table = SpaceTable::new(vec![Mat4::IDENTITY, Mat4::IDENTITY]);
     let mut payloads = helio_core::ScenePayloads::default();
     sync.apply(&world, DVec3::ZERO, &mut table, &mut payloads);
-    let openings = payloads
-        .get(&PORTAL_OPENINGS)
-        .expect("the openings are published");
-    assert_eq!(openings.0.len(), 2, "one opening per direction");
-    // Each opening's view map places what it shows beyond it: the partner's
-    // position lands at its own.
-    for opening in &openings.0 {
-        let here = opening.transform().w_axis.truncate();
-        let partner = openings
-            .0
+    let chains = payloads
+        .get(&PORTAL_CHAIN_SET)
+        .expect("the chains are published");
+    // One direct route per direction, then the deeper ones (a portal seen
+    // through its partner), shallowest first.
+    let direct: Vec<_> = chains
+        .chains
+        .iter()
+        .filter(|route| route.openings.len() == 1)
+        .collect();
+    assert_eq!(direct.len(), 2, "one direct route per direction");
+    assert!(
+        chains.chains.len() > 2,
+        "routes through both portals in turn"
+    );
+    assert!(
+        chains
+            .chains
+            .windows(2)
+            .all(|pair| pair[0].openings.len() <= pair[1].openings.len())
+    );
+    // Each direct opening's map places what it shows beyond it: the
+    // partner's position lands at its own.
+    for route in &direct {
+        let opening = &chains.openings[route.openings[0] as usize];
+        let here = opening.transform.w_axis.truncate();
+        let partner = direct
             .iter()
-            .find(|other| other.key != opening.key)
+            .map(|other| &chains.openings[other.openings[0] as usize])
+            .find(|other| other.transform.w_axis.truncate().distance(here) > 1.0)
             .unwrap()
-            .transform()
+            .transform
             .w_axis
             .truncate();
         assert!(
@@ -120,8 +138,8 @@ fn a_pair_publishes_an_opening_each_way_and_takes_no_table_slot() {
                 < 1e-3
         );
     }
-    // What a portal shows is a view of the frame, not content placed in a
-    // coordinate space: the frame's table keeps only its own slots.
+    // What a portal shows carries its own map: the frame's table keeps only
+    // its own slots.
     assert_eq!(table.matrices().len(), 2);
     let mut again = helio_core::ScenePayloads::default();
     sync.apply(
@@ -131,7 +149,7 @@ fn a_pair_publishes_an_opening_each_way_and_takes_no_table_slot() {
         &mut again,
     );
     assert!(
-        Arc::ptr_eq(&openings, &again.get(&PORTAL_OPENINGS).unwrap()),
-        "unchanged openings are the same payload"
+        Arc::ptr_eq(&chains, &again.get(&PORTAL_CHAIN_SET).unwrap()),
+        "unchanged chains are the same payload"
     );
 }

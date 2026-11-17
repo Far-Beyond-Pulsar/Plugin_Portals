@@ -2,7 +2,7 @@
 name = "helio-pass-portal-cull"
 version = "0.1.0"
 edition = "2021"
-description = "The portals' contracts (the frame's openings and their view maps) and the CPU projection of authored portals"
+description = "The portals' CPU projection of authored portals, the chains it publishes, and the plugin's settings"
 
 [features]
 default = ["gpu"]
@@ -14,6 +14,7 @@ helio-settings = { workspace = true }
 helio-feature-api = { workspace = true }
 glam = { workspace = true }
 helio-core = { workspace = true }
+helio-portal-api = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }
 pulsar_scenedb = { workspace = true }
 # Sublevel placements (`SubLevelActorRow`): the engine's scene structure.

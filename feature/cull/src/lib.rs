@@ -1,23 +1,18 @@
-//! The portals' contracts and their CPU projection.
+//! The portals' CPU projection and their settings.
 //!
-//! - [`PORTAL_OPENINGS`]: the frame's direct openings, each with its view map,
-//!   which the portals' views drawer (`helio-pass-portal-instances`) renders
-//!   as inline views of the frame (`helio_core::view`).
 //! - The projection a host runs on its authored portals: pairs and poses
 //!   ([`PortalRow`]), the resolver ([`SubLevelResolver`]) and the bridge
 //!   ([`PortalProjectionBridge`]) that turn them into view rows and the
-//!   target-to-source maps ([`PortalProjectionFrame`]), and
-//!   [`PortalOpenings::from_frame`].
+//!   target-to-source maps ([`PortalProjectionFrame`]), and [`chain_set`],
+//!   the chains every drawer draws its content through
+//!   (`helio_portal_api::PORTAL_CHAIN_SET`).
 //! - The portal math ([`portal_view_map`], [`PortalPair`]) and the plugin's
 //!   settings ([`PortalSettings`]).
-//!
-//! Every drawer of the frame draws what a portal shows with its own program,
-//! from the opening's view; nothing here culls or draws geometry.
 
 pub mod feature;
 /// The portal feature's host settings.
 pub mod settings;
-pub use feature::{portals_enabled, PortalSettings};
+pub use feature::{portal_settings, portals_enabled, PortalSettings};
 
 mod portal_math;
 pub use portal_math::{
@@ -39,8 +34,5 @@ pub use components::PortalChain;
 pub use components::PortalProjectionCountsRow;
 pub use components::PortalRow;
 pub use components::PortalViewRow;
-pub use contract::{
-    portal_openings, GpuPortalView, PortalOpening, PortalOpenings, PORTAL_OPENINGS,
-    PORTAL_VIEW_SNIPPET,
-};
+pub use contract::{chain_set, chain_set_with_poses, GpuPortalView, PORTAL_VIEW_SNIPPET};
 pub mod components;

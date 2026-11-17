@@ -31,6 +31,7 @@ ui_level_editor = { workspace = true, optional = true }
 # The plugin's integration tests (`tests/`): the plugin as a game links it.
 glam = { workspace = true }
 helio-core = { workspace = true }
+helio-portal-api = { workspace = true }
 pulsar_scene_model = { workspace = true }
 pulsar_scenedb = { workspace = true }
 helio = { workspace = true }

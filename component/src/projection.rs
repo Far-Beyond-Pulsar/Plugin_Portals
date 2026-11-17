@@ -12,13 +12,14 @@
 //!    other row the renderer reads.
 //! 3. The feature's `SubLevelResolver` + `PortalProjectionBridge` turn the
 //!    pairs into the frame's openings, each with the view map that places
-//!    what it shows beyond it.
-//! 4. The openings go to the portals' drawer as the frame's
-//!    `helio_pass_portal_cull::PORTAL_OPENINGS` payload. The drawer renders
-//!    each visible one as an inline view of the frame (`helio_core::view`),
-//!    recursing through portals seen through portals, so only the direct
-//!    openings are published: no recursion chains, no coordinate-space slots
-//!    in the frame's table, nothing uploaded.
+//!    what it shows beyond it, and every route through them (a portal seen
+//!    through portals) up to the settings' depth and count
+//!    (`helio_pass_portal_cull::settings::PORTALS`).
+//! 4. They go to the frame as `helio_portal_api::PORTAL_CHAIN_SET`: the
+//!    portals' chains pass keeps the routes the camera sees and every drawer
+//!    draws its content through them into the frame's own G-buffer. Nothing
+//!    takes a slot in the frame's coordinate-space table: a route carries
+//!    its composed map.
 //!
 //! [`PortalSync`] does it for one renderer: the engine makes one per renderer
 //! (a registered space producer, `engine_backend::scene::SpaceProducer`).
@@ -31,14 +32,16 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use engine_backend::scene::{SpaceProducer, SpaceTable};
-use glam::{DMat4, DQuat, DVec3, Mat4};
+use glam::{DMat4, DQuat, DVec3};
 use helio_pass_portal_cull::components::PortalRow;
 use helio_pass_portal_cull::{
-    PORTAL_OPENINGS, PortalOpenings, PortalProjectionBridge, SubLevelContents, SubLevelResolver,
+    chain_set_with_poses, PortalProjectionBridge, PortalProjectionConfig, PortalSettings,
+    SubLevelContents, SubLevelResolver,
 };
-use pulsar_scene_model::Visibility;
+use helio_portal_api::{PortalChainSet, PORTAL_CHAIN_SET};
 use pulsar_scene_model::attachments::enabled_components;
 use pulsar_scene_model::hierarchy_transform::world_matrix_of;
+use pulsar_scene_model::Visibility;
 use pulsar_scenedb::{Entity, World};
 
 use crate::PortalComponent as AuthoredPortal;
@@ -132,7 +135,7 @@ pub fn pair_portals(world: &World) -> Pairing {
 /// A portal's pose and opening: the object's world rotation and translation
 /// (relative to `origin`), and half the opening's extent scaled by the object's
 /// world scale along its own X and Y.
-fn pose_of(world: &World, portal: &Portal, origin: DVec3) -> Option<(Mat4, [f32; 2])> {
+fn pose_of(world: &World, portal: &Portal, origin: DVec3) -> Option<(DMat4, [f32; 2])> {
     let matrix = world_matrix_of(world, portal.owner)?;
     let (scale, rotation, translation) = matrix.to_scale_rotation_translation();
     if !(scale.x.is_finite() && scale.y.is_finite()) {
@@ -150,7 +153,7 @@ fn pose_of(world: &World, portal: &Portal, origin: DVec3) -> Option<(Mat4, [f32;
         (f64::from(portal.width) * scale.x.abs() * 0.5) as f32,
         (f64::from(portal.height) * scale.y.abs() * 0.5) as f32,
     ];
-    Some((pose.as_mat4(), half))
+    Some((pose, half))
 }
 
 /// The resolver for `pairing`: one sublevel (the default level, in which all
@@ -164,7 +167,7 @@ pub fn build_resolver(world: &World, pairing: &Pairing, origin: DVec3) -> SubLev
             };
             rows.push((
                 portal.instance,
-                PortalRow::new(Some(partner.instance), pose, half),
+                PortalRow::new(Some(partner.instance), pose.as_mat4(), half),
             ));
         }
     }
@@ -173,29 +176,42 @@ pub fn build_resolver(world: &World, pairing: &Pairing, origin: DVec3) -> SubLev
     resolver
 }
 
-/// Builds the frame's openings each frame and publishes them to the
-/// portals' drawer.
+/// Builds the frame's chains each frame and publishes them.
 pub struct PortalSync {
-    /// Direct openings only: recursion is the drawer's, per view.
+    /// Routes up to the settings' depth and count.
     bridge: PortalProjectionBridge,
     /// Problems already reported, so a standing problem is logged once.
     reported: HashSet<PortalProblem>,
-    openings: Arc<PortalOpenings>,
+    chains: Arc<PortalChainSet>,
 }
 
 impl Default for PortalSync {
+    /// With the project's portal settings.
     fn default() -> Self {
-        Self {
-            bridge: PortalProjectionBridge::new(1).expect("a nonzero chain depth"),
-            reported: HashSet::new(),
-            openings: Arc::new(PortalOpenings::default()),
-        }
+        use engine_backend::subsystems::render::helio_renderer::project_settings;
+        Self::with_settings(&PortalSettings::from_settings(&project_settings::resolved(
+            &helio_pass_portal_cull::settings::PORTALS,
+        )))
     }
 }
 
 impl PortalSync {
-    /// Rebuild the openings of `world` (relative to `origin`).
-    pub fn rebuild(&mut self, world: &World, origin: DVec3) -> PortalOpenings {
+    /// Projecting routes as deep and as many as `settings` allow.
+    pub fn with_settings(settings: &PortalSettings) -> Self {
+        let config = PortalProjectionConfig {
+            max_chain_depth: settings.max_chain_depth.max(1),
+            max_chains: Some(settings.max_chains.max(1)),
+            ..PortalProjectionConfig::default()
+        };
+        Self {
+            bridge: PortalProjectionBridge::with_config(config).expect("a nonzero chain depth"),
+            reported: HashSet::new(),
+            chains: Arc::new(PortalChainSet::default()),
+        }
+    }
+
+    /// Rebuild the chains of `world` (relative to `origin`).
+    pub fn rebuild(&mut self, world: &World, origin: DVec3) -> PortalChainSet {
         let pairing = pair_portals(world);
         let current: HashSet<PortalProblem> = pairing.problems.iter().copied().collect();
         for problem in &current {
@@ -205,21 +221,29 @@ impl PortalSync {
         }
         self.reported.retain(|problem| current.contains(problem));
         if pairing.pairs.is_empty() {
-            return PortalOpenings::default();
+            return PortalChainSet::default();
         }
         let resolver = build_resolver(world, &pairing, origin);
+        // The poses in f64 about the origin: the openings' maps compose from
+        // these, not the resolver's f32 rows.
+        let poses: std::collections::HashMap<_, _> = pairing
+            .pairs
+            .iter()
+            .flat_map(|(a, b)| [a, b])
+            .filter_map(|portal| Some((portal.instance, pose_of(world, portal, origin)?.0)))
+            .collect();
         match self.bridge.build(&resolver) {
-            Ok(frame) => PortalOpenings::from_frame(&frame),
+            Ok(frame) => chain_set_with_poses(&frame, |entity| poses.get(&entity).copied()),
             Err(error) => {
                 tracing::warn!("portals not drawn: {error}");
-                PortalOpenings::default()
+                PortalChainSet::default()
             }
         }
     }
 
-    /// The openings last published.
-    pub fn openings(&self) -> &Arc<PortalOpenings> {
-        &self.openings
+    /// The chains last published.
+    pub fn chains(&self) -> &Arc<PortalChainSet> {
+        &self.chains
     }
 }
 
@@ -231,11 +255,11 @@ impl SpaceProducer for PortalSync {
         _table: &mut SpaceTable,
         payloads: &mut helio_core::ScenePayloads,
     ) {
-        let openings = self.rebuild(world, origin);
-        if *self.openings != openings {
-            self.openings = Arc::new(openings);
+        let chains = self.rebuild(world, origin);
+        if *self.chains != chains {
+            self.chains = Arc::new(chains);
         }
-        payloads.insert(&PORTAL_OPENINGS, self.openings.clone());
+        payloads.insert(&PORTAL_CHAIN_SET, self.chains.clone());
     }
 
     fn derivation(

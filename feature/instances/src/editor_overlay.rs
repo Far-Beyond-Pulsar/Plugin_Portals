@@ -50,9 +50,9 @@ pub struct PortalEditorOverlayPass {
     bind_group: Option<wgpu::BindGroup>,
     bind_group_key: Option<[wgpu::Buffer; 2]>,
     portal_count: u32,
-    /// The frame's openings (`helio_pass_portal_cull::PORTAL_OPENINGS`),
-    /// as of the last membership check.
-    openings: Option<std::sync::Arc<helio_pass_portal_cull::PortalOpenings>>,
+    /// The frame's chains (`helio_portal_api::PORTAL_CHAIN_SET`), as of the
+    /// last membership check: their direct openings are the portals.
+    openings: Option<std::sync::Arc<helio_portal_api::PortalChainSet>>,
     editor_mode: bool,
     debug_texts: Vec<PortalDebugText>,
     glyph_buffer: wgpu::Buffer,
@@ -355,11 +355,11 @@ impl RenderPass for PortalEditorOverlayPass {
     }
 
     /// A member in editor mode while it has something to draw: live portals
-    /// (`PORTAL_COUNTS`) or what the editor published ([`PORTAL_DEBUG_TEXTS`],
+    /// (`helio_portal_api::PORTAL_CHAIN_SET`) or what the editor published ([`PORTAL_DEBUG_TEXTS`],
     /// [`PORTAL_DEBUG_GEOMETRY`]).
     fn is_member(&mut self, scene: &mut helio_core::SceneContent<'_>) -> bool {
         if let Some(buffers) = scene.scene_buffers() {
-            self.openings = helio_pass_portal_cull::portal_openings(buffers);
+            self.openings = helio_portal_api::portal_chain_set(buffers);
             let texts = buffers.payload(&PORTAL_DEBUG_TEXTS);
             if texts
                 .as_deref()
@@ -473,12 +473,20 @@ impl RenderPass for PortalEditorOverlayPass {
     }
 
     fn prepare(&mut self, ctx: &PrepareContext) -> HelioResult<()> {
-        // Every opening the frame publishes, whether or not this view sees
-        // through it.
+        // Every portal of the frame (the opening of each direct route),
+        // whether or not this view sees through it.
         let rows: Vec<helio_pass_portal_cull::GpuPortalView> = self
             .openings
             .iter()
-            .flat_map(|openings| openings.0.iter().map(|opening| opening.view))
+            .flat_map(|set| {
+                set.chains
+                    .iter()
+                    .filter(|route| route.openings.len() == 1)
+                    .map(|route| {
+                        let id = route.openings[0];
+                        helio_pass_portal_cull::GpuPortalView::of(&set.openings[id as usize], id)
+                    })
+            })
             .collect();
         self.portal_count = rows.len() as u32;
         let bytes =

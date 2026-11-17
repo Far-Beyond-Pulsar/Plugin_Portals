@@ -4,13 +4,13 @@
 //! - The component ([`component`]): `PortalComponent`, an opening that shows
 //!   what is behind its partner (the other portal with its Link ID).
 //! - Pairing and projection ([`projection`]): each frame the authored
-//!   portals are paired and their openings, each with its view map, are
-//!   published to the portals' drawer
-//!   (`helio_pass_portal_cull::PORTAL_OPENINGS`). The engine runs it for every
+//!   portals are paired, projected, and their chains (every opening with its
+//!   view map, every route through them) published to the frame
+//!   (`helio_portal_api::PORTAL_CHAIN_SET`). The engine runs it for every
 //!   renderer as a space producer ([`PortalSync`]).
-//! - The plugin's Helio feature ([`render_features`]: the views drawer,
-//!   which renders what each opening shows as an inline view of the frame,
-//!   and the editor overlay, `helio_pass_portal_instances::PortalFeature`)
+//! - The plugin's Helio feature ([`render_features`]: the chains pass, the
+//!   aperture mask and the editor overlay,
+//!   `helio_pass_portal_instances::PortalFeature`)
 //!   and its settings from the project's portal settings
 //!   ([`configure_renderer`], the group
 //!   `helio_pass_portal_cull::settings::PORTALS`).
@@ -37,8 +37,8 @@ pub use projection::{
 /// pairing overlays.
 pub const PORTAL_DEBUG_VIEW_MODE: u32 = 35;
 
-/// The portals' drawer (each opening's inline view, a G-buffer drawer) and
-/// the editor overlay.
+/// The portals' passes (the chains, the aperture mask) and the editor
+/// overlay.
 pub fn render_features() -> helio_feature_api::FeatureSet {
     helio_feature_api::FeatureSet::new().with(helio_pass_portal_instances::PortalFeature)
 }

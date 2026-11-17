@@ -44,6 +44,7 @@ helio-feature-api = { workspace = true }
 helio-mesh-api = { workspace = true }
 helio-pass-forward-lit = { workspace = true }
 helio-pass-portal-cull = { workspace = true }
+helio-portal-api = { workspace = true }
 helio-pass-portal-instances = { workspace = true }
 helio-pass-gi = { workspace = true }
 helio-pass-sky = { workspace = true, features = ["host-rows"] }

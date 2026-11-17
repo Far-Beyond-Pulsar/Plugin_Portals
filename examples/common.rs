@@ -496,15 +496,15 @@ pub fn preset() -> helio_presets::PresetGraph {
 }
 
 /// Hand `frame` (built with its own table, `PortalProjectionBridge::build`)
-/// to `renderer`: its direct openings become the portals' drawer's
-/// `PORTAL_OPENINGS` payload. Each visible opening renders as an inline view
-/// of the frame; portals seen through portals recurse there.
+/// to `renderer`: its chains (every opening, every route through them) become
+/// the frame's `helio_portal_api::PORTAL_CHAIN_SET`, which every drawer draws
+/// its content through.
 pub fn set_projection_frame(
     renderer: &mut helio::Renderer,
     frame: &helio_pass_portal_cull::PortalProjectionFrame,
 ) {
     renderer.set_scene_payload(
-        &helio_pass_portal_cull::PORTAL_OPENINGS,
-        std::sync::Arc::new(helio_pass_portal_cull::PortalOpenings::from_frame(frame)),
+        &helio_portal_api::PORTAL_CHAIN_SET,
+        std::sync::Arc::new(helio_pass_portal_cull::chain_set(frame)),
     );
 }
