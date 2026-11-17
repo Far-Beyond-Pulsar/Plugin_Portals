@@ -27,10 +27,7 @@ use common::{
     box_mesh, make_material, new_scene_db_with_gpu_mirror, point_light, scene_db_handle,
     spawn_light, spawn_material, spawn_mesh, spawn_object,
 };
-use helio::{
-    required_experimental_features, required_wgpu_features, required_wgpu_limits, Camera, Renderer,
-    RendererBuilder, RendererConfig,
-};
+use helio::{Camera, Renderer, RendererBuilder, RendererConfig};
 use helio_pass_portal_cull::portal_pose_facing;
 use pulsar_scenedb::{Entity, SceneDb};
 
@@ -133,7 +130,7 @@ impl ApplicationHandler for App {
         let queue = graphics.queue.clone();
         let format = graphics.surface_config.format;
 
-        let mut config = RendererConfig::new(size.width, size.height, format);
+        let config = RendererConfig::new(size.width, size.height, format);
         let mut scene_db = new_scene_db_with_gpu_mirror(&device, &queue);
         let mut renderer = RendererBuilder::new(config, scene_db_handle(&scene_db))
             .with_graph(common::preset())
@@ -352,7 +349,6 @@ impl ApplicationHandler for App {
             glam::Vec3::new(0.0, 0.0, -1.0),
             glam::Vec3::Y,
         );
-        let half_extent = glam::Vec2::new(HALF_WIDTH, HALF_HEIGHT);
 
         // Looking through the near portal (standing near +Z, facing further
         // +Z) shows what's actually near the far end.

@@ -26,10 +26,7 @@ use common::{
     box_mesh, flush_scene_db, make_material, new_scene_db_with_gpu_mirror, point_light,
     scene_db_handle, spawn_light, spawn_material, spawn_mesh, spawn_object,
 };
-use helio::{
-    required_experimental_features, required_wgpu_features, required_wgpu_limits, Camera, Renderer,
-    RendererBuilder, RendererConfig,
-};
+use helio::{Camera, Renderer, RendererBuilder, RendererConfig};
 use helio_pass_portal_cull::{PortalProjectionBridge, SubLevelContents, SubLevelResolver};
 use pulsar_scenedb::{Entity, SceneDb};
 
@@ -263,21 +260,6 @@ impl ApplicationHandler for App {
             0,
             SubLevelContents::new([], authored_portals.iter().map(|(e, p)| (*e, *p))),
         );
-        let initial_position = if std::env::var("CUBE_CLOSEUP").is_ok() {
-            Vec3::new(0.0, 0.8, 4.3)
-        } else {
-            Vec3::new(4.0, 3.0, 4.0)
-        };
-        let initial_yaw = if std::env::var("CUBE_CLOSEUP").is_ok() {
-            std::f32::consts::PI
-        } else {
-            -0.785
-        };
-        let initial_pitch = if std::env::var("CUBE_CLOSEUP").is_ok() {
-            -0.03
-        } else {
-            -0.488
-        };
         // The openings and every route through them, published once.
         let projection_frame = PortalProjectionBridge::new(portals.max_chain_depth)
             .expect("portal_cube projection depth")
