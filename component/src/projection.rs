@@ -35,11 +35,12 @@ use engine_backend::scene::{SpaceProducer, SpaceTable};
 use glam::{DMat4, DQuat, DVec3};
 use helio_pass_portal_cull::components::PortalRow;
 use helio_pass_portal_cull::{
-    chain_set_with_poses, PortalProjectionBridge, PortalProjectionConfig, PortalSettings,
+    chain_set_with_spaces, PortalProjectionBridge, PortalProjectionConfig, PortalSettings,
     SubLevelContents, SubLevelResolver,
 };
 use helio_portal_api::{PortalChainSet, PORTAL_CHAIN_SET};
 use pulsar_scene_model::attachments::enabled_components;
+use pulsar_scene_model::frames::space_of;
 use pulsar_scene_model::hierarchy_transform::world_matrix_of;
 use pulsar_scene_model::Visibility;
 use pulsar_scenedb::{Entity, World};
@@ -226,14 +227,23 @@ impl PortalSync {
         let resolver = build_resolver(world, &pairing, origin);
         // The poses in f64 about the origin: the openings' maps compose from
         // these, not the resolver's f32 rows.
-        let poses: std::collections::HashMap<_, _> = pairing
+        let endpoints: std::collections::HashMap<_, _> = pairing
             .pairs
             .iter()
             .flat_map(|(a, b)| [a, b])
-            .filter_map(|portal| Some((portal.instance, pose_of(world, portal, origin)?.0)))
+            .filter_map(|portal| {
+                Some((
+                    portal.instance,
+                    (pose_of(world, portal, origin)?.0, space_of(world, portal.owner)),
+                ))
+            })
             .collect();
         match self.bridge.build(&resolver) {
-            Ok(frame) => chain_set_with_poses(&frame, |entity| poses.get(&entity).copied()),
+            Ok(frame) => chain_set_with_spaces(
+                &frame,
+                |entity| endpoints.get(&entity).map(|(pose, _)| *pose),
+                |entity| endpoints.get(&entity).map_or(0, |(_, space)| *space),
+            ),
             Err(error) => {
                 tracing::warn!("portals not drawn: {error}");
                 PortalChainSet::default()

@@ -40,8 +40,8 @@ fn vs_stamp(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
 }
 
 @fragment
-fn fs_stamp(input: StampOutput) -> @location(0) u32 {
-    return input.id + 1u;
+fn fs_stamp(input: StampOutput) -> @location(0) vec2<u32> {
+    return vec2<u32>(input.id + 1u, bitcast<u32>(input.clip_position.z));
 }
 
 // ── Clear behind ─────────────────────────────────────────────────────────────

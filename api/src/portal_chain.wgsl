@@ -35,8 +35,8 @@ struct GpuPortalChain {
     /// surfaces carry it in their tag (`gbuffer_remap_tag`). Equal to the
     /// chain's index in `PORTAL_CHAINS`, so a remap finds its chain.
     remap:                 u32,
-    _pad0:                 u32,
-    _pad1:                 u32,
+    source_space:          u32,
+    destination_space:     u32,
 }
 
 /// One opening as a chain sees it (`helio_portal_api::GpuPortalStage`, 96

@@ -102,8 +102,13 @@ fn visible_chains(set: &PortalChainSet, eye: DVec3, view_proj: Mat4, cap: usize)
         let mut outer = DMat4::IDENTITY;
         let mut eyes = Vec::with_capacity(depth);
         let mut seen = true;
+        let mut space = set.openings[route.openings[0] as usize].source_space;
         for &index in &route.openings {
             let opening = &set.openings[index as usize];
+            if opening.source_space != space {
+                seen = false;
+                break;
+            }
             let eye_here = outer.inverse().transform_point3(eye);
             let local = opening.transform.inverse().transform_point3(eye_here);
             // Drawn corners are where the camera sees them: near the frame
@@ -115,6 +120,7 @@ fn visible_chains(set: &PortalChainSet, eye: DVec3, view_proj: Mat4, cap: usize)
             }
             eyes.push(eye_here);
             outer *= opening.content_to_drawn;
+            space = opening.destination_space;
         }
         if !seen {
             continue;
@@ -212,6 +218,7 @@ pub struct PortalChainsPass {
     /// [`helio_portal_api::PORTAL_CHAIN_VOLUMES`].
     volumes: wgpu::Buffer,
     remaps: wgpu::Buffer,
+    remap_spaces: wgpu::Buffer,
     openings: wgpu::Buffer,
     chain_count: u32,
     opening_count: u32,
@@ -234,6 +241,12 @@ impl PortalChainsPass {
             remaps: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Portal Remaps"),
                 size: helio_frame_api::lighting::VIEW_REMAPS_BYTES,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            remap_spaces: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Portal Remap Spaces"),
+                size: helio_frame_api::lighting::VIEW_REMAP_SPACES_BYTES,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
@@ -271,6 +284,7 @@ impl RenderPass for PortalChainsPass {
             PORTAL_STAGES,
             helio_portal_api::PORTAL_CHAIN_VOLUMES,
             helio_frame_api::lighting::VIEW_REMAPS,
+            helio_frame_api::lighting::VIEW_REMAP_SPACES,
         ]
     }
 
@@ -301,6 +315,7 @@ impl RenderPass for PortalChainsPass {
             .collect();
         let mut stages = Vec::new();
         let mut remaps = Vec::with_capacity(live.len());
+        let mut remap_spaces = Vec::with_capacity(live.len());
         let mut previous = HashMap::with_capacity(live.len());
         let mut openings: Vec<GpuPortalView> = Vec::new();
         let mut stamped: HashMap<u32, ()> = HashMap::new();
@@ -353,6 +368,8 @@ impl RenderPass for PortalChainsPass {
                 .copied()
                 .unwrap_or(chain.content_to_drawn);
             previous.insert(chain.key, chain.content_to_drawn);
+            let destination = *chain.openings.last().expect("visible route is nonempty");
+            let destination_space = set.openings[destination as usize].destination_space;
             chains.push(GpuPortalChain {
                 content_to_drawn: chain.content_to_drawn.as_mat4().to_cols_array(),
                 prev_content_to_drawn: prev.as_mat4().to_cols_array(),
@@ -362,16 +379,20 @@ impl RenderPass for PortalChainsPass {
                 hole_count,
                 opening: outer,
                 remap: remap as u32,
-                _pad: [0; 2],
+                source_space: set.openings[outer as usize].source_space,
+                destination_space,
             });
             remaps.push(chain.content_to_drawn.inverse().as_mat4().to_cols_array());
+            remap_spaces.push(destination_space);
         }
         self.previous = previous;
         self.live_chains = live
             .iter()
-            .map(|chain| helio_portal_api::LiveChain {
+            .zip(&chains)
+            .map(|(chain, gpu)| helio_portal_api::LiveChain {
                 key: chain.key,
                 depth: chain.openings.len() as u32,
+                destination_space: gpu.destination_space,
                 content_to_drawn: chain.content_to_drawn.as_mat4(),
                 content_eye: chain
                     .content_to_drawn
@@ -411,6 +432,7 @@ impl RenderPass for PortalChainsPass {
             ctx.write_buffer(&self.stages, 0, bytemuck::cast_slice(&stages));
             ctx.write_buffer(&self.volumes, 0, bytemuck::cast_slice(&volumes));
             ctx.write_buffer(&self.remaps, 0, bytemuck::cast_slice(&remaps));
+            ctx.write_buffer(&self.remap_spaces, 0, bytemuck::cast_slice(&remap_spaces));
             ctx.write_buffer(&self.openings, 0, bytemuck::cast_slice(&openings));
         }
         Ok(())
@@ -444,6 +466,10 @@ impl RenderPass for PortalChainsPass {
             (PORTAL_STAGES, own(&self.stages)),
             (helio_portal_api::PORTAL_CHAIN_VOLUMES, own(&self.volumes)),
             (helio_frame_api::lighting::VIEW_REMAPS, own(&self.remaps)),
+            (
+                helio_frame_api::lighting::VIEW_REMAP_SPACES,
+                own(&self.remap_spaces),
+            ),
             (MASK_OPENINGS, own(&self.openings)),
         ] {
             frame.write_buffer_binding(name, buffer, "PortalChains");
@@ -744,6 +770,8 @@ mod tests {
             transform,
             half_extent: Vec2::splat(1.0),
             content_to_drawn,
+            source_space: 0,
+            destination_space: 0,
         };
         PortalChainSet {
             openings: vec![opening(a, map_a), opening(b, map_a.inverse())],
@@ -783,6 +811,26 @@ mod tests {
         assert!(drawn.distance(DVec3::new(0.0, 0.0, -2.0)) < 1e-9, "{drawn}");
     }
 
+    #[test]
+    fn nested_routes_require_matching_coordinate_spaces() {
+        let mut set = pair();
+        set.openings[0].content_to_drawn = DMat4::IDENTITY;
+        set.openings[0].destination_space = 1;
+        set.openings[1] = PortalOpening {
+            source_space: 1,
+            destination_space: 2,
+            ..set.openings[0]
+        };
+        set.chains.remove(1); // Test only the route entering opening 0.
+        let eye = Vec3::new(0.0, 0.0, 5.0);
+        let vp = camera(eye, Vec3::ZERO);
+        assert_eq!(visible_chains(&set, eye.as_dvec3(), vp, 300).len(), 2);
+
+        // The matrices stay identical. Only the next aperture's space changes.
+        set.openings[1].source_space = 2;
+        assert_eq!(visible_chains(&set, eye.as_dvec3(), vp, 300).len(), 1);
+    }
+
     /// A pair 6000 km apart (a planet's span) composes in f64: content right
     /// beside the far portal lands at the near one to well under a millimetre,
     /// where an f32 composition misses by centimetres.
@@ -796,6 +844,8 @@ mod tests {
                 transform: near,
                 half_extent: Vec2::splat(1.0),
                 content_to_drawn: map,
+                source_space: 0,
+                destination_space: 0,
             }],
             chains: vec![PortalRoute {
                 key: 1,

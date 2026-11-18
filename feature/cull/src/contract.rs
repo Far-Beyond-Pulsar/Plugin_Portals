@@ -85,6 +85,15 @@ pub fn chain_set_with_poses(
     frame: &PortalProjectionFrame,
     pose: impl Fn(Entity) -> Option<DMat4>,
 ) -> PortalChainSet {
+    chain_set_with_spaces(frame, pose, |_| 0)
+}
+
+/// Supplies the authored coordinate-space slot of each host endpoint alongside its pose.
+pub fn chain_set_with_spaces(
+    frame: &PortalProjectionFrame,
+    pose: impl Fn(Entity) -> Option<DMat4>,
+    space: impl Fn(Entity) -> u32,
+) -> PortalChainSet {
     let mut projections = vec![None; frame.portal_views.len()];
     for (key, &index) in &frame.projection_indices {
         if let Some(slot) = projections.get_mut(index as usize) {
@@ -131,6 +140,8 @@ pub fn chain_set_with_poses(
                 transform,
                 half_extent: Vec2::from_array(row.half_extent),
                 content_to_drawn,
+                source_space: key.map_or(0, |key| space(key.source.entity)),
+                destination_space: key.map_or(0, |key| space(key.target.entity)),
             }
         })
         .collect();

@@ -62,6 +62,9 @@ pub struct PortalOpening {
     /// What it shows to where it shows it: the rigid map placing the place
     /// beyond its partner behind this opening.
     pub content_to_drawn: DMat4,
+    /// The authored coordinate-space slots of the opening and its partner.
+    pub source_space: u32,
+    pub destination_space: u32,
 }
 
 /// One route through the openings.
@@ -103,7 +106,8 @@ pub struct GpuPortalChain {
     /// The chain's remap: its index in [`PORTAL_CHAINS`] and in
     /// `helio_frame_api::lighting::VIEW_REMAPS`.
     pub remap: u32,
-    pub _pad: [u32; 2],
+    pub source_space: u32,
+    pub destination_space: u32,
 }
 
 /// One opening as a chain sees it (the snippet's `GpuPortalStage`, 96
@@ -159,6 +163,8 @@ pub struct LiveChain {
     pub key: u64,
     /// Openings deep (1: seen directly through one opening).
     pub depth: u32,
+    /// The authored frame slot of the last opening's destination.
+    pub destination_space: u32,
     /// The content's world to the drawn (frame) space.
     pub content_to_drawn: glam::Mat4,
     /// The camera in the content's world (frame space there).
@@ -169,10 +175,27 @@ pub struct LiveChain {
 /// chain `i`), shallowest first.
 pub const PORTAL_LIVE_CHAINS: helio_core::ResourceKey<&[LiveChain]> =
     helio_core::ResourceKey::new("portal_live_chains");
-/// The aperture mask: an `R32Uint` texture at the frame's internal size,
-/// `opening + 1` where an outermost opening is visible, `0` elsewhere.
+/// The aperture mask at the frame's internal size. R is `opening + 1`
+/// where an outermost opening is visible, and G holds the bitcast reversed-Z
+/// depth of that opening's plane. Both channels are zero elsewhere.
 pub const PORTAL_MASK: &str = "portal_mask";
-pub const PORTAL_MASK_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Uint;
+pub const PORTAL_MASK_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg32Uint;
+
+/// A zero-initialized stand-in for consumers in frames with no aperture mask.
+pub fn empty_aperture_mask(device: &wgpu::Device) -> wgpu::TextureView {
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("No Visible Apertures"),
+            size: wgpu::Extent3d::default(),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: PORTAL_MASK_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+        .create_view(&Default::default())
+}
 
 /// The G-buffer draw order of the portals' mask: after every drawer of the
 /// direct view (the meshes open the phase; foliage, virtual geometry and
