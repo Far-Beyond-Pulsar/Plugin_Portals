@@ -1,8 +1,9 @@
 //! What the portals plugin registers for the editor (the `editor` feature):
-//! its viewport overlay.
+//! its viewport overlay and recursion depth control.
 
+use helio_pass_portal_cull::settings::{MAX_CHAIN_DEPTH, PORTALS};
 use portals_editor::level_editor;
-use ui_level_editor::extend::viewport::DebugOverlay;
+use ui_level_editor::extend::viewport::{CameraToolbarInteger, DebugOverlay};
 
 /// Everything the portals plugin registers for the editor.
 pub(crate) fn build(p: &mut pulsar_plugins::PluginBuilder) {
@@ -19,5 +20,11 @@ pub(crate) fn build(p: &mut pulsar_plugins::PluginBuilder) {
         panel: level_editor::overlay_panel,
         perspective: level_editor::overlay_perspective,
         hidden: level_editor::overlay_hidden,
+    });
+    p.add(CameraToolbarInteger {
+        origin: p.origin(),
+        group: &PORTALS,
+        key: MAX_CHAIN_DEPTH,
+        label: "Portal depth",
     });
 }

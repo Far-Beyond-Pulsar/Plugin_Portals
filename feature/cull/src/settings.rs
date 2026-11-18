@@ -2,9 +2,11 @@
 //! describes the renderer's): engines build their settings UI and read the
 //! values back through it.
 
-use helio_settings::{integer, toggle, Group, Resolved};
+use helio_settings::{Group, Resolved, integer, toggle};
 
 use crate::PortalSettings;
+
+pub const MAX_CHAIN_DEPTH: &str = "max_chain_depth";
 
 /// The portals' quality: whether their passes build, and how deep and how
 /// many routes through them a frame draws. A host lists it with its other
@@ -22,7 +24,7 @@ pub static PORTALS: Group = Group {
             "Portal passes: what an opening shows is drawn through it",
         ),
         integer(
-            "max_chain_depth",
+            MAX_CHAIN_DEPTH,
             "Recursion Depth",
             "Portals",
             (1, 8),
@@ -48,7 +50,7 @@ impl PortalSettings {
         debug_assert!(std::ptr::eq(settings.group(), &PORTALS));
         Self {
             enabled: settings.bool("enabled"),
-            max_chain_depth: settings.number("max_chain_depth") as usize,
+            max_chain_depth: settings.number(MAX_CHAIN_DEPTH) as usize,
             max_chains: settings.number("max_chains") as usize,
         }
     }
