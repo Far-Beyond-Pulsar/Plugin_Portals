@@ -78,7 +78,13 @@ fn corners(opening: &PortalOpening) -> [DVec3; 4] {
 /// shallowest first, at most `cap`: each opening faced from its front and
 /// in the frustum where it is drawn, and its shorter prefix kept too (the
 /// prefix draws the wall the deeper opening is set in).
-fn visible_chains(set: &PortalChainSet, eye: DVec3, view_proj: Mat4, cap: usize) -> Vec<LiveChain> {
+fn visible_chains(
+    set: &PortalChainSet,
+    eye: DVec3,
+    view_proj: Mat4,
+    cap: usize,
+    camera_space: Option<u32>,
+) -> Vec<LiveChain> {
     let mut live: Vec<LiveChain> = Vec::new();
     let mut by_route: HashMap<Vec<u32>, usize> = HashMap::new();
     for route in &set.chains {
@@ -103,6 +109,9 @@ fn visible_chains(set: &PortalChainSet, eye: DVec3, view_proj: Mat4, cap: usize)
         let mut eyes = Vec::with_capacity(depth);
         let mut seen = true;
         let mut space = set.openings[route.openings[0] as usize].source_space;
+        if camera_space.is_some_and(|camera_space| camera_space != space) {
+            continue;
+        }
         for &index in &route.openings {
             let opening = &set.openings[index as usize];
             if opening.source_space != space {
@@ -306,7 +315,13 @@ impl RenderPass for PortalChainsPass {
         };
         let eye = Vec3::from_slice(&ctx.camera_data.position_near[..3]).as_dvec3();
         let view_proj = Mat4::from_cols_array(&ctx.camera_data.view_proj);
-        let live = visible_chains(&set, eye, view_proj, self.cap);
+        let live = visible_chains(
+            &set,
+            eye,
+            view_proj,
+            self.cap,
+            ctx.camera_data.coordinate_space(),
+        );
 
         let mut chains = Vec::with_capacity(live.len());
         let volumes: Vec<_> = live
@@ -803,7 +818,7 @@ mod tests {
     fn only_routes_through_faced_openings_in_view_are_kept() {
         let set = pair();
         let eye = Vec3::new(0.0, 0.0, 5.0);
-        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 300);
+        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 300, None);
         assert_eq!(live.iter().map(|c| c.key).collect::<Vec<_>>(), [1]);
         // A route's map puts what is beside B behind A.
         let beside_b = DVec3::new(100.0, 0.0, -2.0);
@@ -824,11 +839,11 @@ mod tests {
         set.chains.remove(1); // Test only the route entering opening 0.
         let eye = Vec3::new(0.0, 0.0, 5.0);
         let vp = camera(eye, Vec3::ZERO);
-        assert_eq!(visible_chains(&set, eye.as_dvec3(), vp, 300).len(), 2);
+        assert_eq!(visible_chains(&set, eye.as_dvec3(), vp, 300, None).len(), 2);
 
         // The matrices stay identical. Only the next aperture's space changes.
         set.openings[1].source_space = 2;
-        assert_eq!(visible_chains(&set, eye.as_dvec3(), vp, 300).len(), 1);
+        assert_eq!(visible_chains(&set, eye.as_dvec3(), vp, 300, None).len(), 1);
     }
 
     /// A pair 6000 km apart (a planet's span) composes in f64: content right
@@ -853,7 +868,7 @@ mod tests {
             }],
         };
         let eye = Vec3::new(0.0, 0.0, 5.0);
-        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 300);
+        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 300, None);
         let beside_far = DVec3::new(6.0e6, 1234.5, -3.0e6 - 2.0);
         let drawn = live[0].content_to_drawn.transform_point3(beside_far);
         assert!(drawn.distance(DVec3::new(0.0, 0.0, -2.0)) < 1e-6, "{drawn}");
@@ -866,7 +881,7 @@ mod tests {
     fn a_chain_volume_holds_what_its_opening_shows() {
         let set = pair();
         let eye = Vec3::new(0.0, 0.0, 5.0);
-        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 300);
+        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 300, None);
         let volume = chain_volume(&set, &live[0], eye.as_dvec3(), camera(eye, Vec3::ZERO));
         assert_eq!(
             volume.plane_count as usize,
@@ -892,7 +907,7 @@ mod tests {
     fn the_budget_keeps_the_shallowest_routes() {
         let set = pair();
         let eye = Vec3::new(0.0, 0.0, 5.0);
-        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 1);
+        let live = visible_chains(&set, eye.as_dvec3(), camera(eye, Vec3::ZERO), 1, None);
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].openings.len(), 1);
     }

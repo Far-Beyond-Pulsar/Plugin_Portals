@@ -184,6 +184,8 @@ pub struct PortalSync {
     /// Problems already reported, so a standing problem is logged once.
     reported: HashSet<PortalProblem>,
     chains: Arc<PortalChainSet>,
+    origin: DVec3,
+    enabled: bool,
 }
 
 impl Default for PortalSync {
@@ -208,6 +210,8 @@ impl PortalSync {
             bridge: PortalProjectionBridge::with_config(config).expect("a nonzero chain depth"),
             reported: HashSet::new(),
             chains: Arc::new(PortalChainSet::default()),
+            origin: DVec3::ZERO,
+            enabled: settings.enabled,
         }
     }
 
@@ -258,6 +262,19 @@ impl PortalSync {
 }
 
 impl SpaceProducer for PortalSync {
+    fn camera_traversal_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn traverse_camera(&self, start: DVec3, end: DVec3, space: u32) -> Option<(DVec3, DQuat, u32)> {
+        if !self.enabled {
+            return None;
+        }
+        let (position, rotation, space) =
+            self.chains.traverse(start - self.origin, end - self.origin, space)?;
+        Some((position + self.origin, rotation, space))
+    }
+
     fn apply(
         &mut self,
         world: &World,
@@ -266,6 +283,7 @@ impl SpaceProducer for PortalSync {
         payloads: &mut helio_core::ScenePayloads,
     ) {
         let chains = self.rebuild(world, origin);
+        self.origin = origin;
         if *self.chains != chains {
             self.chains = Arc::new(chains);
         }

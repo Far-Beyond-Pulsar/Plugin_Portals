@@ -29,7 +29,7 @@
 //!   [`PORTAL_CHAIN_VOLUMES`] bounds what each chain shows, for drawers
 //!   that look their content up in a tree.
 
-use glam::{DMat4, Vec2};
+use glam::{DMat4, DVec3, Vec2};
 
 /// The frame's portal chains, as a host publishes them ([`PORTAL_CHAIN_SET`]).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -43,6 +43,47 @@ pub struct PortalChainSet {
 impl PortalChainSet {
     pub fn is_empty(&self) -> bool {
         self.chains.is_empty()
+    }
+
+    /// Map a movement segment through linked apertures in its current space.
+    /// Positions are relative to the same origin as the published openings.
+    pub fn traverse(
+        &self,
+        mut start: DVec3,
+        mut end: DVec3,
+        mut space: u32,
+    ) -> Option<(DVec3, glam::DQuat, u32)> {
+        let mut rotation = glam::DQuat::IDENTITY;
+        let mut crossed = false;
+        // This bounds work for a long segment crossing a cyclic network.
+        for _ in 0..16 {
+            let hit = self
+                .openings
+                .iter()
+                .filter(|opening| opening.source_space == space)
+                .filter_map(|opening| {
+                    let local = opening.transform.inverse();
+                    let a = local.transform_point3(start);
+                    let b = local.transform_point3(end);
+                    if a.z >= 0.0 || b.z < 0.0 || b.z <= a.z {
+                        return None;
+                    }
+                    let t = -a.z / (b.z - a.z);
+                    let point = a.lerp(b, t);
+                    (point.x.abs() <= f64::from(opening.half_extent.x)
+                        && point.y.abs() <= f64::from(opening.half_extent.y))
+                        .then_some((t, opening))
+                })
+                .min_by(|(a, _), (b, _)| a.total_cmp(b));
+            let Some((t, opening)) = hit else { break };
+            let map = opening.content_to_drawn.inverse();
+            start = map.transform_point3(start.lerp(end, t));
+            end = map.transform_point3(end);
+            rotation = (glam::DQuat::from_mat4(&map) * rotation).normalize();
+            space = opening.destination_space;
+            crossed = true;
+        }
+        crossed.then_some((end, rotation, space))
     }
 }
 
@@ -222,6 +263,35 @@ pub const PORTAL_CHAIN_SNIPPET: helio_core::shader::ShaderSnippet =
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn movement_crosses_at_the_aperture_and_keeps_the_remaining_motion() {
+        let target = DVec3::new(1.0e9, 25.0, 0.0);
+        let travel = DMat4::from_translation(target)
+            * DMat4::from_rotation_y(std::f64::consts::PI);
+        for destination in [4, 9] {
+            let set = PortalChainSet {
+                openings: vec![PortalOpening {
+                    transform: DMat4::IDENTITY,
+                    half_extent: Vec2::ONE,
+                    content_to_drawn: travel.inverse(),
+                    source_space: 4,
+                    destination_space: destination,
+                }],
+                chains: Vec::new(),
+            };
+            // The endpoint is outside the opening. The swept segment hits it.
+            let start = DVec3::new(-3.0, 0.0, -2.0);
+            let end = DVec3::new(3.0, 0.0, 2.0);
+            let (position, rotation, space) = set.traverse(start, end, 4).unwrap();
+            assert!(position.abs_diff_eq(travel.transform_point3(end), 1e-6));
+            assert!((rotation * DVec3::Z).abs_diff_eq(DVec3::NEG_Z, 1e-9));
+            assert_eq!(space, destination);
+            assert!(set.traverse(start, end, 0).is_none());
+            assert!(set.traverse(end, start, 4).is_none());
+            assert!(set.traverse(start + DVec3::Y * 2.0, end + DVec3::Y * 2.0, 4).is_none());
+        }
+    }
 
     /// The rows match their WGSL: naga's layout of the snippet's structs is
     /// the Rust structs' size, member for member.

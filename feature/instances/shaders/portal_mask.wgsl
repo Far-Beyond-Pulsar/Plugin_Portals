@@ -26,6 +26,7 @@ const LOCAL_CORNERS: array<vec2<f32>, 6> = array<vec2<f32>, 6>(
 struct StampOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) @interpolate(flat) id: u32,
+    @location(1) depth_zw: vec2<f32>,
 }
 
 @vertex
@@ -33,15 +34,31 @@ fn vs_stamp(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let opening = openings[instance_index];
     let local = LOCAL_CORNERS[vertex_index] * opening.half_extent;
     var out: StampOutput;
-    out.clip_position = cameras[0].view_proj * (opening.transform * vec4<f32>(local, 0.0, 1.0));
+    let clip = cameras[0].view_proj * (opening.transform * vec4<f32>(local, 0.0, 1.0));
+    // Rasterize the aperture without the near-plane clip. Keep X, Y and W
+    // so the projected outline and the eye/side clipping stay intact.
+    out.clip_position = vec4<f32>(clip.xy, 0.0, clip.w);
+    out.depth_zw = clip.zw;
     // `coordinate_space` carries the opening's id (`GpuPortalView::of`).
     out.id = opening.coordinate_space;
     return out;
 }
 
+struct StampFragment {
+    @location(0) aperture: vec2<u32>,
+    @builtin(frag_depth) depth: f32,
+}
+
 @fragment
-fn fs_stamp(input: StampOutput) -> @location(0) vec2<u32> {
-    return vec2<u32>(input.id + 1u, bitcast<u32>(input.clip_position.z));
+fn fs_stamp(input: StampOutput) -> StampFragment {
+    // Interpolate the original homogeneous depth and divide at the pixel:
+    // an oblique opening can have pixels on both sides of the near plane.
+    let projected_depth = input.depth_zw.x / input.depth_zw.y;
+    if projected_depth < 0.0 {
+        discard;
+    }
+    let depth = min(projected_depth, 1.0);
+    return StampFragment(vec2<u32>(input.id + 1u, bitcast<u32>(depth)), depth);
 }
 
 // ── Clear behind ─────────────────────────────────────────────────────────────
